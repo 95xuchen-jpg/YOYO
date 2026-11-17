@@ -54,4 +54,7 @@ class WindowGuard:
         observation = self.observe(window, expected_state)
         if observation is None:
             return None
-        return window.map_point(x, y, content)
+        try:
+            return window.map_point(x, y, content)
+        except (ValueError, OverflowError, TypeError, ZeroDivisionError):
+            return None  # invalid coordinates fail closed; never reach an input adapter
