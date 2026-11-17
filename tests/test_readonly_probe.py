@@ -31,6 +31,23 @@ class TestProbe(unittest.TestCase):
         self.assertEqual(result['status'], 'paused')
         self.assertFalse(result['windows'][0]['capture_ok'])
 
+    def test_first_window_replaced_while_second_is_captured(self):
+        class LateSwap(Provider):
+            def __init__(self):
+                super().__init__()
+                self.second_seen = False
+            def screenshot(self, handle):
+                if handle == 2:
+                    self.second_seen = True
+                return b'frame'
+            def identity(self, handle):
+                if handle == 1 and self.second_seen:
+                    return SimpleNamespace(hwnd=1, pid=999)
+                return self.windows[handle-1]
+        result = probe(LateSwap(), 'game')
+        self.assertEqual(result['status'], 'paused')
+        self.assertFalse(result['windows'][0]['capture_ok'])
+
     def test_capture_failure(self): self.assertEqual(probe(Provider(fail=True),'game')['status'],'paused')
     def test_geometry_change(self): self.assertEqual(probe(Provider(change=True),'game')['status'],'paused')
     def test_ambiguous_pid(self):
