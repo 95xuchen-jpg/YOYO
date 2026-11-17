@@ -19,12 +19,25 @@ class LauncherTests(unittest.TestCase):
         windows = [WindowIdentity(101, 10, 'Game', 'GameClass'), WindowIdentity(202, 20, 'Game', 'GameClass')]
         provider.discover.return_value = windows
         provider.bind.side_effect = windows
+        provider.identity.side_effect = windows
         provider.client_rect.side_effect = [Rect(0,0,800,600)] * 3 + [Rect(800,0,640,480)] * 3
         provider.screenshot.return_value = b'fake-frame'
         result = execute('windows-probe', title='Game', provider=provider)
         self.assertEqual(result['status'], 'capture_ready_not_game_verified')
         self.assertFalse(result['input_enabled'])
         self.assertFalse(result['game_state_verified'])
+
+    def test_identity_swap_during_capture_pauses(self):
+        provider = Mock()
+        windows = [WindowIdentity(101, 10, 'Game', 'GameClass'), WindowIdentity(202, 20, 'Game', 'GameClass')]
+        provider.discover.return_value = windows
+        provider.bind.side_effect = windows
+        provider.identity.side_effect = [WindowIdentity(101, 999, 'Game', 'GameClass'), windows[1]]
+        provider.client_rect.side_effect = [Rect(0,0,800,600)] * 3 + [Rect(800,0,640,480)] * 3
+        provider.screenshot.return_value = b'fake-frame'
+        result = execute('windows-probe', title='Game', provider=provider)
+        self.assertEqual(result['status'], 'paused')
+        self.assertFalse(result['input_enabled'])
 
     def test_duplicate_pid_pauses(self):
         provider = Mock()
