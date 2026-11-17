@@ -41,3 +41,4 @@ $manifest = [ordered]@{
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $PSScriptRoot 'dist\build_manifest.json') -Encoding utf8
 Write-Output "Windows offline diagnostic smoke passed; SHA256=$hash"
 Write-Output 'Read-only diagnostic EXE only. Windows game capture and two-account validation NOT performed.'
+exit 0
