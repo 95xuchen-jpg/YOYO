@@ -32,8 +32,11 @@ class AdapterTests(unittest.TestCase):
     def test_unknown_state_pauses(self):
         self.assertIsNone(WindowGuard(FakeProvider(frames=[b'unknown']),Detector()).observe(self.w,'ready'))
     def test_no_action_on_bad_reference_point(self):
-        with self.assertRaises(ValueError):
-            WindowGuard(FakeProvider(),Detector()).safe_point(self.w,'ready',900,300)
+        self.assertIsNone(WindowGuard(FakeProvider(),Detector()).safe_point(self.w,'ready',900,300))
+    def test_invalid_content_rect_pauses(self):
+        self.assertIsNone(WindowGuard(FakeProvider(),Detector()).safe_point(self.w,'ready',400,300,Rect(900,0,100,100)))
+    def test_invalid_coordinate_type_pauses(self):
+        self.assertIsNone(WindowGuard(FakeProvider(),Detector()).safe_point(self.w,'ready',None,300))
     def test_bounds_change_after_second_frame_pauses(self):
         rects=[Rect(0,0,800,600),Rect(0,0,800,600),Rect(1,0,800,600)]
         self.assertIsNone(WindowGuard(FakeProvider(rects=rects),Detector()).observe(self.w,'ready'))
