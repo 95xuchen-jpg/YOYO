@@ -30,6 +30,14 @@ def probe(provider, title_filter):
                             'client_size': [before.width, before.height] if before else None})
         except Exception:
             results.append({'handle': item.hwnd, 'pid': item.pid, 'capture_ok': False, 'client_size': None})
+    # A window verified earlier may be replaced while the other is captured.
+    # Revalidate BOTH identities and bounds before reporting the pair as ready.
+    for index, item in enumerate(candidates):
+        try:
+            if provider.identity(item.hwnd) != item or provider.client_rect(item.hwnd) is None:
+                results[index]['capture_ok'] = False
+        except Exception:
+            results[index]['capture_ok'] = False
     return {'mode': 'read_only', 'status': 'capture_ready_not_game_verified' if all(r['capture_ok'] for r in results) else 'paused',
             'windows': results, 'game_state_verified': False, 'input_enabled': False}
 
