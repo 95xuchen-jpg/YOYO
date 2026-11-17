@@ -10,6 +10,7 @@ class Provider:
         self.calls = 0
     def discover(self, title): return self.windows
     def bind(self, handle): return self.windows[handle-1]
+    def identity(self, handle): return self.windows[handle-1]
     def client_rect(self, handle):
         self.calls += 1
         if self.change and self.calls == 2: return Rect(0,0,799,600)
@@ -22,6 +23,14 @@ class TestProbe(unittest.TestCase):
         self.assertEqual(result['status'], 'capture_ready_not_game_verified')
         self.assertFalse(result['game_state_verified'])
         self.assertFalse(result['input_enabled'])
+    def test_identity_changed_after_capture(self):
+        class SwappedIdentity(Provider):
+            def identity(self, handle):
+                return SimpleNamespace(hwnd=handle, pid=999)
+        result = probe(SwappedIdentity(), 'game')
+        self.assertEqual(result['status'], 'paused')
+        self.assertFalse(result['windows'][0]['capture_ok'])
+
     def test_capture_failure(self): self.assertEqual(probe(Provider(fail=True),'game')['status'],'paused')
     def test_geometry_change(self): self.assertEqual(probe(Provider(change=True),'game')['status'],'paused')
     def test_ambiguous_pid(self):
