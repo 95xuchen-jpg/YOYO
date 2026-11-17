@@ -21,7 +21,10 @@ def probe(provider, title_filter):
             middle = provider.client_rect(item.hwnd)
             frame2 = provider.screenshot(item.hwnd) if middle == before and frame1 else None
             after = provider.client_rect(item.hwnd)
-            valid = (bound == item and before is not None and before == middle == after
+            # Recheck OS identity after both captures: HWND reuse, PID/title/class
+            # changes must never be reported as a safe, stable binding.
+            final_identity = provider.identity(item.hwnd)
+            valid = (bound == item and final_identity == item and before is not None and before == middle == after
                      and bool(frame1) and bool(frame2))
             results.append({'handle': item.hwnd, 'pid': item.pid, 'capture_ok': valid,
                             'client_size': [before.width, before.height] if before else None})
