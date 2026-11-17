@@ -1,0 +1,16 @@
+{
+  "iteration": 19,
+  "completed_beijing": "2026-11-17 17:30",
+  "changes": [
+    "Read-only Windows probe now requires two consecutive captures with stable client bounds",
+    "Updated launcher mock to match three geometry reads per window",
+    "Added two negative regression cases"
+  ],
+  "offline_tests": {
+    "passed": 77,
+    "failed": 0
+  },
+  "windows_exe_built": false,
+  "game_tested": false,
+  "blocker": "No authorized Windows runner execution; diagnostic EXE not built"
+}

@@ -1,0 +1,1 @@
+{"iteration":5,"date_local":"2026-11-17 03:32 Asia/Shanghai","baseline":"iteration03","changed":["adapters.py","tests/test_adapters.py","README.md"],"tests_passed":16,"tests_failed":0,"test_kind":"offline fake provider","integrated_into_v1_0_6":false,"exe_built":false,"windows_game_tested":false}

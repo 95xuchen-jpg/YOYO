@@ -1,0 +1,1 @@
+{"iteration":6,"status":"offline-tested, not Windows-verified","changes":["Read-only Win32 window discovery and PID/class/title identity binding","ClientToScreen-based client bounds","Pillow screenshot adapter with fail-closed errors","Five offline adapter tests"],"limits":["No real Windows run","No image state detector","No mouse injection","Not integrated with original EXE"]}

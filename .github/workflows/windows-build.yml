@@ -1,0 +1,29 @@
+name: Windows read-only diagnostic build
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '**/*.py'
+      - 'requirements-build.txt'
+      - 'build_windows.ps1'
+      - '.github/workflows/windows-build.yml'
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Build and smoke-test Windows EXE
+        shell: pwsh
+        run: ./build_windows.ps1
+      - name: Upload diagnostic build only
+        uses: actions/upload-artifact@v4
+        with:
+          name: PLN_ReadOnly_Diagnostics_unverified_game
+          path: |
+            dist/PLN_ReadOnly_Diagnostics.exe
+            dist/build_manifest.json
+          if-no-files-found: error

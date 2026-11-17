@@ -1,0 +1,43 @@
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+Set-Location $PSScriptRoot
+python -m venv .venv
+if ($LASTEXITCODE -ne 0) { throw 'venv failed' }
+$python = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'
+$runtimeVersion = (& $python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')").Trim()
+if ($runtimeVersion -ne '3.11') { throw "Expected Python 3.11 from setup-python, got $runtimeVersion" }
+& $python -m pip install -r requirements-build.txt
+if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+& $python -m compileall -q .
+if ($LASTEXITCODE -ne 0) { throw 'Syntax compilation failed' }
+& $python -m unittest discover -s tests -q
+if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed' }
+& $python -m PyInstaller --noconfirm --clean --onefile --name PLN_ReadOnly_Diagnostics launcher.py
+if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
+$exe = Join-Path $PSScriptRoot 'dist\PLN_ReadOnly_Diagnostics.exe'
+if (!(Test-Path $exe)) { throw 'No EXE produced' }
+$offline = & $exe --mode offline 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Windows EXE offline smoke failed: $offline" }
+$report = $offline | Out-String | ConvertFrom-Json
+$negative = & $exe --mode windows-probe 2>&1
+$negativeExit = $LASTEXITCODE
+if ($negativeExit -ne 2) { throw "Unsafe probe behavior: missing title must exit 2, got $negativeExit" }
+$negativeReport = $negative | Out-String | ConvertFrom-Json
+if ($negativeReport.status -ne 'paused' -or $negativeReport.reason -ne 'explicit_title_required') {
+  throw 'Unsafe probe behavior: missing title did not fail closed'
+}
+if ($null -eq $report -or $report.window_preflight -eq $null) { throw 'Smoke JSON missing window_preflight' }
+$hash = (Get-FileHash $exe -Algorithm SHA256).Hash
+$manifest = [ordered]@{
+  artifact = 'PLN_ReadOnly_Diagnostics.exe'
+  sha256 = $hash
+  bytes = (Get-Item $exe).Length
+  build_utc = [DateTime]::UtcNow.ToString('o')
+  test_scope = 'Windows offline simulation, fail-closed probe negative smoke, and Python unit tests'
+  game_tested = $false
+  automation_enabled = $false
+  result = 'diagnostic_only'
+}
+$manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $PSScriptRoot 'dist\build_manifest.json') -Encoding utf8
+Write-Output "Windows offline diagnostic smoke passed; SHA256=$hash"
+Write-Output 'Read-only diagnostic EXE only. Windows game capture and two-account validation NOT performed.'

@@ -1,0 +1,1 @@
+{"iteration":3,"local_date":"2026-11-17","status":"offline_code_tested","modules":["core.py","tests/test_core.py"],"test_count":8,"test_passed":8,"test_failed":0,"windows_exe_built":false,"real_game_tested":false,"next_blocker":"connect real Windows HWND/screenshot adapters and existing v1.0.6 modules"}

@@ -1,0 +1,8 @@
+{
+  "iteration": 20,
+  "date": "2026-11-17",
+  "changes": ["Windows frozen EXE build script now verifies fail-closed behavior when probe title is omitted"],
+  "windows_build": "not_executed",
+  "game_validation": "not_executed",
+  "release": "blocked_pending_windows_runner"
+}

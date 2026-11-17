@@ -1,0 +1,1 @@
+{"iteration":14,"date_beijing":"2026-11-17 12:25","changes":["Added opt-in Windows read-only window discovery/capture health CLI","Added six synthetic tests including geometry drift and identity collision"],"offline_tests":"67/67 passed","windows_game_validation":false,"exe_built":false,"original_exe_modified":false}
