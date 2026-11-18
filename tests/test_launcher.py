@@ -19,8 +19,8 @@ class LauncherTests(unittest.TestCase):
         windows = [WindowIdentity(101, 10, 'Game', 'GameClass'), WindowIdentity(202, 20, 'Game', 'GameClass')]
         provider.discover.return_value = windows
         provider.bind.side_effect = windows
-        provider.identity.side_effect = windows
-        provider.client_rect.side_effect = [Rect(0,0,800,600)] * 3 + [Rect(800,0,640,480)] * 3
+        provider.identity.side_effect = lambda handle: {101: windows[0], 202: windows[1]}[handle]
+        provider.client_rect.side_effect = lambda handle: {101: Rect(0,0,800,600), 202: Rect(800,0,640,480)}[handle]
         provider.screenshot.return_value = b'fake-frame'
         result = execute('windows-probe', title='Game', provider=provider)
         self.assertEqual(result['status'], 'capture_ready_not_game_verified')
