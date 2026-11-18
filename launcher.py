@@ -42,12 +42,17 @@ def execute(mode, *, db=None, title=None, provider=None):
         # Rehearsal only: this never sends input to either game window.
         from runner import simulate
         import tempfile
-        if db is None:
-            with tempfile.TemporaryDirectory() as tmp:
-                rehearsal = simulate(Path(tmp) / 'state.sqlite')
-                rehearsal['journal'] = 'temporary (removed)'
-        else:
-            rehearsal = simulate(Path(db))
+        try:
+            if db is None:
+                with tempfile.TemporaryDirectory() as tmp:
+                    rehearsal = simulate(Path(tmp) / 'state.sqlite')
+                    rehearsal['journal'] = 'temporary (removed)'
+            else:
+                rehearsal = simulate(Path(db))
+        except Exception as exc:
+            return {'mode': mode, 'status': 'paused', 'reason': 'offline_rehearsal_failed',
+                    'error_type': type(exc).__name__, 'input_enabled': False,
+                    'game_state_verified': False}
         after = execute('windows-probe', title=title, provider=provider)
         if after.get('status') != 'capture_ready_not_game_verified' or after.get('windows') != observation.get('windows'):
             return {'mode': mode, 'status': 'paused', 'reason': 'window_changed_during_rehearsal',
