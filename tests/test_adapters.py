@@ -4,7 +4,7 @@ from adapters import WindowGuard
 
 class FakeProvider:
     def __init__(self, rects=None, frames=None):
-        self.rects=list(rects if rects is not None else [Rect(0,0,800,600)]*3)
+        self.rects=list(rects if rects is not None else [Rect(0,0,800,600)]*4)
         self.frames=list(frames if frames is not None else [b'ready',b'ready'])
         self.calls=0
     def client_rect(self, handle):
@@ -37,6 +37,16 @@ class AdapterTests(unittest.TestCase):
         self.assertIsNone(WindowGuard(FakeProvider(),Detector()).safe_point(self.w,'ready',400,300,Rect(900,0,100,100)))
     def test_invalid_coordinate_type_pauses(self):
         self.assertIsNone(WindowGuard(FakeProvider(),Detector()).safe_point(self.w,'ready',None,300))
+    def test_move_after_observation_before_coordinate_use_pauses(self):
+        stable=Rect(0,0,800,600)
+        moved=Rect(25,0,800,600)
+        provider=FakeProvider(rects=[stable,stable,stable,moved])
+        self.assertIsNone(WindowGuard(provider,Detector()).safe_point(self.w,'ready',400,300))
+        self.assertEqual(provider.calls,4)
+    def test_disappears_after_observation_before_coordinate_use_pauses(self):
+        stable=Rect(0,0,800,600)
+        provider=FakeProvider(rects=[stable,stable,stable,None])
+        self.assertIsNone(WindowGuard(provider,Detector()).safe_point(self.w,'ready',400,300))
     def test_bounds_change_after_second_frame_pauses(self):
         rects=[Rect(0,0,800,600),Rect(0,0,800,600),Rect(1,0,800,600)]
         self.assertIsNone(WindowGuard(FakeProvider(rects=rects),Detector()).observe(self.w,'ready'))
