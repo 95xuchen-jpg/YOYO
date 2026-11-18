@@ -55,6 +55,10 @@ class WindowGuard:
         if observation is None:
             return None
         try:
-            return window.map_point(x, y, content)
-        except (ValueError, OverflowError, TypeError, ZeroDivisionError):
-            return None  # invalid coordinates fail closed; never reach an input adapter
+            point = window.map_point(x, y, content)
+            # Revalidate after mapping: a window may move between observation and use.
+            if self.provider.client_rect(window.handle) != observation.bounds:
+                return None
+            return point
+        except Exception:
+            return None  # invalid/stale coordinates fail closed; never reach input
