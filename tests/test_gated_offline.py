@@ -32,6 +32,24 @@ class GatedOfflineTests(unittest.TestCase):
         self.assertEqual(result['reason'], 'window_changed_during_rehearsal')
         self.assertFalse(result['input_enabled'])
 
+    def test_preflight_exception_fails_closed(self):
+        with patch('readonly_probe.probe', side_effect=OSError('capture unavailable')), patch('runner.simulate') as scheduler:
+            result = execute('windows-gated-offline', title='Game', provider=Mock())
+        self.assertEqual(result['status'], 'paused')
+        self.assertEqual(result['reason'], 'window_preflight_failed')
+        self.assertEqual(result['error_type'], 'OSError')
+        self.assertFalse(result['input_enabled'])
+        scheduler.assert_not_called()
+
+    def test_revalidation_exception_fails_closed(self):
+        ready = {'status': 'capture_ready_not_game_verified', 'windows': [{'handle': 1}, {'handle': 2}]}
+        with patch('readonly_probe.probe', side_effect=[ready, OSError('window closed')]), patch('runner.simulate', return_value={'mode': 'offline_simulation_only'}):
+            result = execute('windows-gated-offline', title='Game', provider=Mock())
+        self.assertEqual(result['status'], 'paused')
+        self.assertEqual(result['reason'], 'window_revalidation_failed')
+        self.assertEqual(result['error_type'], 'OSError')
+        self.assertFalse(result['input_enabled'])
+
 
 if __name__ == '__main__':
     unittest.main()
