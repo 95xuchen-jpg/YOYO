@@ -34,17 +34,37 @@ def execute(mode, *, db=None, title=None, provider=None):
             provider = WindowsClientProvider()
         from readonly_probe import probe
         return probe(provider, title)
+    if mode == 'windows-gated-offline':
+        observation = execute('windows-probe', title=title, provider=provider)
+        if observation.get('status') != 'capture_ready_not_game_verified':
+            return {'mode': mode, 'status': 'paused', 'preflight': observation,
+                    'input_enabled': False, 'game_state_verified': False}
+        # Rehearsal only: this never sends input to either game window.
+        from runner import simulate
+        import tempfile
+        if db is None:
+            with tempfile.TemporaryDirectory() as tmp:
+                rehearsal = simulate(Path(tmp) / 'state.sqlite')
+                rehearsal['journal'] = 'temporary (removed)'
+        else:
+            rehearsal = simulate(Path(db))
+        after = execute('windows-probe', title=title, provider=provider)
+        if after.get('status') != 'capture_ready_not_game_verified' or after.get('windows') != observation.get('windows'):
+            return {'mode': mode, 'status': 'paused', 'reason': 'window_changed_during_rehearsal',
+                    'input_enabled': False, 'game_state_verified': False}
+        return {'mode': mode, 'status': 'offline_rehearsal_only', 'preflight': after,
+                'rehearsal': rehearsal, 'input_enabled': False, 'game_state_verified': False}
     raise ValueError('unsupported mode')
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
-    parser.add_argument('--mode', required=True, choices=['offline', 'windows-probe'])
+    parser.add_argument('--mode', required=True, choices=['offline', 'windows-probe', 'windows-gated-offline'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
     parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
     args = parser.parse_args(argv)
-    if args.mode != 'offline' and args.db:
-        parser.error('--db is only supported in offline mode')
+    if args.mode == 'windows-probe' and args.db:
+        parser.error('--db is not supported in windows-probe mode')
     result = execute(args.mode, db=args.db, title=args.title)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get('status') not in ('paused', 'unsupported') else 2
