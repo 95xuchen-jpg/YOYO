@@ -35,7 +35,12 @@ def execute(mode, *, db=None, title=None, provider=None):
         from readonly_probe import probe
         return probe(provider, title)
     if mode == 'windows-gated-offline':
-        observation = execute('windows-probe', title=title, provider=provider)
+        try:
+            observation = execute('windows-probe', title=title, provider=provider)
+        except Exception as exc:
+            return {'mode': mode, 'status': 'paused', 'reason': 'window_preflight_failed',
+                    'error_type': type(exc).__name__, 'input_enabled': False,
+                    'game_state_verified': False}
         if observation.get('status') != 'capture_ready_not_game_verified':
             return {'mode': mode, 'status': 'paused', 'preflight': observation,
                     'input_enabled': False, 'game_state_verified': False}
@@ -53,7 +58,12 @@ def execute(mode, *, db=None, title=None, provider=None):
             return {'mode': mode, 'status': 'paused', 'reason': 'offline_rehearsal_failed',
                     'error_type': type(exc).__name__, 'input_enabled': False,
                     'game_state_verified': False}
-        after = execute('windows-probe', title=title, provider=provider)
+        try:
+            after = execute('windows-probe', title=title, provider=provider)
+        except Exception as exc:
+            return {'mode': mode, 'status': 'paused', 'reason': 'window_revalidation_failed',
+                    'error_type': type(exc).__name__, 'input_enabled': False,
+                    'game_state_verified': False}
         if after.get('status') != 'capture_ready_not_game_verified' or after.get('windows') != observation.get('windows'):
             return {'mode': mode, 'status': 'paused', 'reason': 'window_changed_during_rehearsal',
                     'input_enabled': False, 'game_state_verified': False}
