@@ -51,5 +51,25 @@ class GatedOfflineTests(unittest.TestCase):
         self.assertFalse(result['input_enabled'])
 
 
+    def test_stable_pair_completes_read_only_rehearsal(self):
+        ready = {'status': 'capture_ready_not_game_verified',
+                 'windows': [{'handle': 1, 'pid': 10}, {'handle': 2, 'pid': 20}]}
+        with patch('readonly_probe.probe', side_effect=[ready, ready]) as probe, \
+             patch('runner.simulate', return_value={'mode': 'offline_simulation_only'}) as scheduler:
+            result = execute('windows-gated-offline', title='Game', provider=Mock())
+        self.assertEqual(result['status'], 'offline_rehearsal_only')
+        self.assertFalse(result['input_enabled'])
+        self.assertFalse(result['game_state_verified'])
+        self.assertEqual(probe.call_count, 2)
+        scheduler.assert_called_once()
+
+    def test_missing_title_never_runs_scheduler(self):
+        with patch('runner.simulate') as scheduler:
+            result = execute('windows-gated-offline', title=None, provider=Mock())
+        self.assertEqual(result['status'], 'paused')
+        self.assertFalse(result['input_enabled'])
+        scheduler.assert_not_called()
+
+
 if __name__ == '__main__':
     unittest.main()
