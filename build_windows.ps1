@@ -26,6 +26,13 @@ $negativeReport = $negative | Out-String | ConvertFrom-Json
 if ($negativeReport.status -ne 'paused' -or $negativeReport.reason -ne 'explicit_title_required') {
   throw 'Unsafe probe behavior: missing title did not fail closed'
 }
+$gated = & $exe --mode windows-gated-offline 2>&1
+$gatedExit = $LASTEXITCODE
+if ($gatedExit -ne 2) { throw "Unsafe gated behavior: missing title must exit 2, got $gatedExit" }
+$gatedReport = $gated | Out-String | ConvertFrom-Json
+if ($gatedReport.status -ne 'paused' -or $gatedReport.input_enabled -ne $false -or $gatedReport.game_state_verified -ne $false) {
+  throw 'Unsafe gated behavior: missing title must pause without enabling input or verifying game'
+}
 if ($null -eq $report -or $report.window_preflight -eq $null) { throw 'Smoke JSON missing window_preflight' }
 $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
 $manifest = [ordered]@{
@@ -33,7 +40,7 @@ $manifest = [ordered]@{
   sha256 = $hash
   bytes = (Get-Item $exe).Length
   build_utc = [DateTime]::UtcNow.ToString('o')
-  test_scope = 'Windows offline simulation, fail-closed probe negative smoke, and Python unit tests'
+  test_scope = 'Windows offline simulation, fail-closed probe and gated-entrypoint negative smokes, and Python unit tests'
   game_tested = $false
   automation_enabled = $false
   result = 'diagnostic_only'
