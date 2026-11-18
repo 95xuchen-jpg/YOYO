@@ -48,6 +48,23 @@ class TestProbe(unittest.TestCase):
         self.assertEqual(result['status'], 'paused')
         self.assertFalse(result['windows'][0]['capture_ok'])
 
+    def test_first_window_moves_during_second_capture(self):
+        class LateMove(Provider):
+            def __init__(self):
+                super().__init__()
+                self.second_seen = False
+            def screenshot(self, handle):
+                if handle == 2:
+                    self.second_seen = True
+                return b'frame'
+            def client_rect(self, handle):
+                if handle == 1 and self.second_seen:
+                    return Rect(10, 0, 800, 600)
+                return Rect(0, 0, 800, 600)
+        result = probe(LateMove(), 'game')
+        self.assertEqual(result['status'], 'paused')
+        self.assertFalse(result['windows'][0]['capture_ok'])
+
     def test_capture_failure(self): self.assertEqual(probe(Provider(fail=True),'game')['status'],'paused')
     def test_geometry_change(self): self.assertEqual(probe(Provider(change=True),'game')['status'],'paused')
     def test_ambiguous_pid(self):
