@@ -13,6 +13,7 @@ def probe(provider, title_filter):
     if len({w.hwnd for w in candidates}) != 2 or len({w.pid for w in candidates}) != 2:
         return {'mode': 'read_only', 'status': 'paused', 'reason': 'ambiguous_window_identity'}
     results = []
+    provider_boundaries = []
     for item in candidates:
         try:
             bound = provider.bind(item.hwnd)
@@ -26,15 +27,18 @@ def probe(provider, title_filter):
             final_identity = provider.identity(item.hwnd)
             valid = (bound == item and final_identity == item and before is not None and before == middle == after
                      and bool(frame1) and bool(frame2))
+            provider_boundaries.append(before)
             results.append({'handle': item.hwnd, 'pid': item.pid, 'capture_ok': valid,
                             'client_size': [before.width, before.height] if before else None})
         except Exception:
+            provider_boundaries.append(None)
             results.append({'handle': item.hwnd, 'pid': item.pid, 'capture_ok': False, 'client_size': None})
     # A window verified earlier may be replaced while the other is captured.
     # Revalidate BOTH identities and bounds before reporting the pair as ready.
     for index, item in enumerate(candidates):
         try:
-            if provider.identity(item.hwnd) != item or provider.client_rect(item.hwnd) is None:
+            if (provider.identity(item.hwnd) != item or
+                    provider.client_rect(item.hwnd) != provider_boundaries[index]):
                 results[index]['capture_ok'] = False
         except Exception:
             results[index]['capture_ok'] = False
