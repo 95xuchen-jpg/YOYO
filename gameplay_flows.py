@@ -115,6 +115,14 @@ def _validate_pair(observations: Iterable, accounts: tuple[str, str]):
     return ordered, None
 
 
+def _verify_persistent_bindings(pair, bindings):
+    """Fail closed if an account changes its HWND between verified observations."""
+    current = {o.account_id: o.window_id for o in pair}
+    if bindings is not None and current != bindings:
+        return None, "account_window_binding_changed"
+    return current, None
+
+
 def sweep_advice(dungeon: str, *, explicitly_requested: bool,
                  unlocked: bool, coupon_count: int):
     """Return a read-only eligibility assessment; never consumes a sweep ticket."""
@@ -163,6 +171,7 @@ class CoopFlow:
         self.clock = clock or time.monotonic
         self.phase = "WAITING"
         self.reason = None
+        self._bindings = None
         self._last_signature = None
         self._last_change = self.clock()
 
@@ -182,6 +191,10 @@ class CoopFlow:
         pair, error = _validate_pair(observations, self.accounts)
         if error:
             return self._pause(error)
+        bindings, error = _verify_persistent_bindings(pair, self._bindings)
+        if error:
+            return self._pause(error)
+        self._bindings = bindings
         a, b = pair
         by_account = {o.account_id: o for o in pair}
         leader = by_account[self.leader]
@@ -300,6 +313,7 @@ class DungeonFlow:
         self.clock = clock or time.monotonic
         self.phase = "WAITING"
         self.reason = None
+        self._bindings = None
         self._last_signatures = {}
         self._last_change = {}
         self._objective_progress = {}
@@ -350,6 +364,10 @@ class DungeonFlow:
         pair, error = _validate_pair(observations, self.accounts)
         if error:
             return self._pause(error)
+        bindings, error = _verify_persistent_bindings(pair, self._bindings)
+        if error:
+            return self._pause(error)
+        self._bindings = bindings
         if any(o.dungeon != self.dungeon for o in pair):
             return self._pause("dungeon_name_mismatch")
         if any(o.screen not in self.VALID_SCREENS for o in pair):
