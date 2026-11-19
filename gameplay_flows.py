@@ -10,20 +10,20 @@ from typing import Iterable
 # Source-backed catalog. "guide_level" is a progression hint, not an enforced minimum.
 # Player-count rules are only recorded where the official TapTap announcement states them.
 DUNGEON_RULES = {
-    "水果剧团": {"guide_level": 10, "sweep": True, "party_range": None},
-    "挑战十二生肖": {"guide_level": 20, "sweep": True, "party_range": None},
-    "史莱姆居地": {"guide_level": 30, "sweep": True, "party_range": (2, 12)},
-    "幽灵之地": {"guide_level": None, "sweep": True, "party_range": (2, 12)},
-    "马利大进击": {"guide_level": None, "sweep": True, "party_range": (2, 12)},
-    "亚历山大帝": {"guide_level": None, "sweep": False, "party_range": (2, 12)},
-    "十八铜人阵": {"guide_level": None, "sweep": False, "party_range": (2, 12)},
-    "海底全动员": {"guide_level": None, "sweep": False, "party_range": (2, 12)},
-    "侏罗纪牧场": {"guide_level": None, "sweep": False, "party_range": (2, 12)},
-    "勇闯火焰山": {"guide_level": None, "sweep": False, "party_range": (2, 12)},
-    "拯救蓝星人": {"guide_level": None, "sweep": False, "party_range": (2, 12)},
+    "水果剧团": {"sweep": True, "party_range": None},
+    "挑战十二生肖": {"sweep": True, "party_range": None},
+    "史莱姆居地": {"sweep": True, "party_range": (2, 12)},
+    "幽灵之地": {"sweep": True, "party_range": (2, 12)},
+    "马利大进击": {"sweep": True, "party_range": (2, 12)},
+    "亚历山大帝": {"sweep": False, "party_range": (2, 12)},
+    "十八铜人阵": {"sweep": False, "party_range": (2, 12)},
+    "海底全动员": {"sweep": False, "party_range": (2, 12)},
+    "侏罗纪牧场": {"sweep": False, "party_range": (2, 12)},
+    "勇闯火焰山": {"sweep": False, "party_range": (2, 12)},
+    "拯救蓝星人": {"sweep": False, "party_range": (2, 12)},
     # The 10/13 official notice added sweep for these exact names.
-    "黑暗藏身地": {"guide_level": None, "sweep": True, "party_range": None},
-    "海底总动员": {"guide_level": None, "sweep": True, "party_range": None},
+    "黑暗藏身地": {"sweep": True, "party_range": None},
+    "海底总动员": {"sweep": True, "party_range": None},
 }
 
 COOP_MODE_RANGES = {
@@ -53,9 +53,9 @@ class CoopObservation:
     window_id: int
     server_id: str
     screen: str
-    stable: bool = True
-    identity_ok: bool = True
-    geometry_ok: bool = True
+    stable: bool = False
+    identity_ok: bool = False
+    geometry_ok: bool = False
     mode: str = ""
     room_id: str | None = None
     room_owner: str | None = None
@@ -75,9 +75,9 @@ class DungeonObservation:
     server_id: str
     dungeon: str
     screen: str
-    stable: bool = True
-    identity_ok: bool = True
-    geometry_ok: bool = True
+    stable: bool = False
+    identity_ok: bool = False
+    geometry_ok: bool = False
     room_id: str | None = None
     room_owner: str | None = None
     room_members: tuple[str, ...] = ()
@@ -149,8 +149,8 @@ class CoopFlow:
         if mode not in COOP_MODE_RANGES:
             raise ValueError("unsupported co-op mode")
         low, high = COOP_MODE_RANGES[mode]
-        if not low <= expected_players <= high:
-            raise ValueError("expected player count outside observed mode range")
+        if expected_players != 2 or not low <= expected_players <= high:
+            raise ValueError("this controller manages exactly the two configured accounts")
         if stall_timeout <= 0:
             raise ValueError("stall_timeout must be positive")
         import time
@@ -193,8 +193,9 @@ class CoopFlow:
             return self._pause("co_op_mode_mismatch")
 
         signature = tuple(
-            (o.account_id, o.screen, o.mode, o.room_id, tuple(sorted(o.room_members)),
-             o.listed_room_id, o.match_id, o.result, o.daily_rewards_remaining)
+            (o.account_id, o.screen, o.mode, o.room_id, o.room_owner,
+             tuple(sorted(o.room_members)), o.room_capacity, o.listed_room_id,
+             o.listed_room_owner, o.match_id, o.result, o.daily_rewards_remaining)
             for o in pair
         )
         now = self.clock()
@@ -470,19 +471,19 @@ def gameplay_demo():
     coop = CoopFlow(*accounts, leader="account_A", mode="协力对战")
     def cobs(screen, *, room_id=None, members=(), capacity=None, listed=None, match_id=None, result=None):
         return (
-            CoopObservation("account_A", 101, "server", screen, mode="协力对战",
+            CoopObservation("account_A", 101, "server", screen, stable=True, identity_ok=True, geometry_ok=True, mode="协力对战",
                             room_id=room_id, room_owner="account_A" if room_id else None,
                             room_members=tuple(members), room_capacity=capacity, match_id=match_id, result=result),
-            CoopObservation("account_B", 202, "server", screen, mode="协力对战",
+            CoopObservation("account_B", 202, "server", screen, stable=True, identity_ok=True, geometry_ok=True, mode="协力对战",
                             room_id=room_id, room_owner="account_A" if room_id else None,
                             room_members=tuple(members), room_capacity=capacity, match_id=match_id, result=result),
         )
     coop_steps = [
         coop.advance(cobs("COOP_HOME")),
         coop.advance((
-            CoopObservation("account_A", 101, "server", "ROOM", mode="协力对战", room_id="R1",
+            CoopObservation("account_A", 101, "server", "ROOM", stable=True, identity_ok=True, geometry_ok=True, mode="协力对战", room_id="R1",
                             room_owner="account_A", room_members=("account_A",), room_capacity=4),
-            CoopObservation("account_B", 202, "server", "ROOM_LIST", mode="协力对战",
+            CoopObservation("account_B", 202, "server", "ROOM_LIST", stable=True, identity_ok=True, geometry_ok=True, mode="协力对战",
                             listed_room_id="R1", listed_room_owner="account_A"),
         )),
         coop.advance(cobs("ROOM", room_id="R1", members=accounts, capacity=4)),
@@ -494,11 +495,11 @@ def gameplay_demo():
     dungeon = DungeonFlow(*accounts, dungeon="勇闯火焰山", leader="account_A", relationship="shared")
     def dobs(screen, *, room_id=None, members=(), instance_id=None, battle_round=None, result=None, objectives=()):
         return (
-            DungeonObservation("account_A", 101, "server", "勇闯火焰山", screen,
+            DungeonObservation("account_A", 101, "server", "勇闯火焰山", screen, stable=True, identity_ok=True, geometry_ok=True,
                                room_id=room_id, room_owner="account_A" if room_id else None,
                                room_members=tuple(members), instance_id=instance_id,
                                battle_round=battle_round, result=result, objectives=tuple(objectives)),
-            DungeonObservation("account_B", 202, "server", "勇闯火焰山", screen,
+            DungeonObservation("account_B", 202, "server", "勇闯火焰山", screen, stable=True, identity_ok=True, geometry_ok=True,
                                room_id=room_id, room_owner="account_A" if room_id else None,
                                room_members=tuple(members), instance_id=instance_id,
                                battle_round=battle_round, result=result, objectives=tuple(objectives)),

@@ -6,6 +6,20 @@ from gameplay_flows import (
 )
 
 
+def co(*args, **kwargs):
+    kwargs.setdefault("stable", True)
+    kwargs.setdefault("identity_ok", True)
+    kwargs.setdefault("geometry_ok", True)
+    return CoopObservation(*args, **kwargs)
+
+
+def do(*args, **kwargs):
+    kwargs.setdefault("stable", True)
+    kwargs.setdefault("identity_ok", True)
+    kwargs.setdefault("geometry_ok", True)
+    return DungeonObservation(*args, **kwargs)
+
+
 class CoopFlowTests(unittest.TestCase):
     def setUp(self):
         self.flow = CoopFlow("A", "B", leader="A", mode="协力对战")
@@ -14,9 +28,20 @@ class CoopFlowTests(unittest.TestCase):
         common = dict(mode="协力对战", daily_rewards_remaining=3)
         common.update(kwargs)
         return (
-            CoopObservation("A", 101, "S", screen, **common),
-            CoopObservation("B", 202, "S", screen, **common),
+            co("A", 101, "S", screen, **common),
+            co("B", 202, "S", screen, **common),
         )
+
+    def test_unverified_observation_defaults_fail_closed(self):
+        pair = (
+            CoopObservation("A", 101, "S", "COOP_HOME", mode="协力对战"),
+            CoopObservation("B", 202, "S", "COOP_HOME", mode="协力对战"),
+        )
+        self.assertEqual(self.flow.advance(pair).reason, "two_frame_confirmation_missing")
+
+    def test_controller_rejects_more_than_its_two_accounts(self):
+        with self.assertRaises(ValueError):
+            CoopFlow("A", "B", leader="A", expected_players=3)
 
     def test_create_room_from_coop_home(self):
         d = self.flow.advance(self.pair("COOP_HOME"))
@@ -25,9 +50,9 @@ class CoopFlowTests(unittest.TestCase):
 
     def test_join_only_exact_visible_room(self):
         pair = (
-            CoopObservation("A", 101, "S", "ROOM", mode="协力对战", room_id="R",
+            co("A", 101, "S", "ROOM", mode="协力对战", room_id="R",
                             room_owner="A", room_members=("A",), room_capacity=4),
-            CoopObservation("B", 202, "S", "ROOM_LIST", mode="协力对战",
+            co("B", 202, "S", "ROOM_LIST", mode="协力对战",
                             listed_room_id="R", listed_room_owner="A"),
         )
         d = self.flow.advance(pair)
@@ -42,9 +67,9 @@ class CoopFlowTests(unittest.TestCase):
         steps = [
             self.pair("COOP_HOME"),
             (
-                CoopObservation("A", 101, "S", "ROOM", mode="协力对战", room_id="R",
+                co("A", 101, "S", "ROOM", mode="协力对战", room_id="R",
                                 room_owner="A", room_members=("A",), room_capacity=4),
-                CoopObservation("B", 202, "S", "ROOM_LIST", mode="协力对战",
+                co("B", 202, "S", "ROOM_LIST", mode="协力对战",
                                 listed_room_id="R", listed_room_owner="A"),
             ),
             self.pair("ROOM", room_id="R", room_owner="A", room_members=("A", "B"), room_capacity=4),
@@ -59,21 +84,21 @@ class CoopFlowTests(unittest.TestCase):
 
     def test_room_id_mismatch_pauses(self):
         d = self.flow.advance((
-            CoopObservation("A", 101, "S", "ROOM", mode="协力对战", room_id="R1",
+            co("A", 101, "S", "ROOM", mode="协力对战", room_id="R1",
                             room_owner="A", room_members=("A", "B"), room_capacity=4),
-            CoopObservation("B", 202, "S", "ROOM", mode="协力对战", room_id="R2",
+            co("B", 202, "S", "ROOM", mode="协力对战", room_id="R2",
                             room_owner="A", room_members=("A", "B"), room_capacity=4),
         ))
         self.assertEqual((d.status, d.reason), ("paused", "co_op_room_id_mismatch"))
 
     def test_wrong_server_pauses(self):
         pair = self.pair("COOP_HOME")
-        pair = (pair[0], CoopObservation("B", 202, "OTHER", "COOP_HOME", mode="协力对战"))
+        pair = (pair[0], co("B", 202, "OTHER", "COOP_HOME", mode="协力对战"))
         self.assertEqual(self.flow.advance(pair).reason, "server_mismatch_or_unknown")
 
     def test_unstable_frame_pair_pauses(self):
         pair = self.pair("COOP_HOME")
-        pair = (pair[0], CoopObservation("B", 202, "S", "COOP_HOME", stable=False))
+        pair = (pair[0], co("B", 202, "S", "COOP_HOME", stable=False))
         self.assertEqual(self.flow.advance(pair).reason, "two_frame_confirmation_missing")
 
     def test_capacity_outside_mode_range_pauses(self):
@@ -87,15 +112,15 @@ class CoopFlowTests(unittest.TestCase):
 
     def test_one_account_in_battle_other_in_room_list_pauses(self):
         pair = (
-            CoopObservation("A", 101, "S", "BATTLE", mode="协力对战", match_id="M"),
-            CoopObservation("B", 202, "S", "ROOM_LIST", mode="协力对战"),
+            co("A", 101, "S", "BATTLE", mode="协力对战", match_id="M"),
+            co("B", 202, "S", "ROOM_LIST", mode="协力对战"),
         )
         self.assertEqual(self.flow.advance(pair).reason, "dual_account_phase_mismatch")
 
     def test_match_ids_must_match(self):
         d = self.flow.advance((
-            CoopObservation("A", 101, "S", "MATCH_SUCCESS", mode="协力对战", match_id="M1"),
-            CoopObservation("B", 202, "S", "MATCH_SUCCESS", mode="协力对战", match_id="M2"),
+            co("A", 101, "S", "MATCH_SUCCESS", mode="协力对战", match_id="M1"),
+            co("B", 202, "S", "MATCH_SUCCESS", mode="协力对战", match_id="M2"),
         ))
         self.assertEqual(d.reason, "match_id_mismatch")
 
@@ -103,8 +128,8 @@ class CoopFlowTests(unittest.TestCase):
         now = [0.0]
         flow = CoopFlow("A", "B", leader="A", clock=lambda: now[0], stall_timeout=5)
         pair = (
-            CoopObservation("A", 101, "S", "COOP_HOME", mode="协力对战"),
-            CoopObservation("B", 202, "S", "COOP_HOME", mode="协力对战"),
+            co("A", 101, "S", "COOP_HOME", mode="协力对战"),
+            co("B", 202, "S", "COOP_HOME", mode="协力对战"),
         )
         flow.advance(pair)
         now[0] = 6
@@ -118,8 +143,8 @@ class DungeonFlowTests(unittest.TestCase):
 
     def pair(self, screen, **kwargs):
         return (
-            DungeonObservation("A", 101, "S", "勇闯火焰山", screen, **kwargs),
-            DungeonObservation("B", 202, "S", "勇闯火焰山", screen, **kwargs),
+            do("A", 101, "S", "勇闯火焰山", screen, **kwargs),
+            do("B", 202, "S", "勇闯火焰山", screen, **kwargs),
         )
 
     def test_shared_room_starts_only_after_both_members_verified(self):
@@ -145,8 +170,8 @@ class DungeonFlowTests(unittest.TestCase):
 
     def test_shared_instance_mismatch_pauses(self):
         d = self.flow.advance((
-            DungeonObservation("A", 101, "S", "勇闯火焰山", "LOADING", instance_id="I1"),
-            DungeonObservation("B", 202, "S", "勇闯火焰山", "LOADING", instance_id="I2"),
+            do("A", 101, "S", "勇闯火焰山", "LOADING", instance_id="I1"),
+            do("B", 202, "S", "勇闯火焰山", "LOADING", instance_id="I2"),
         ))
         self.assertEqual(d.reason, "shared_instance_id_mismatch")
 
@@ -157,16 +182,16 @@ class DungeonFlowTests(unittest.TestCase):
 
     def test_shared_battle_round_disagreement_pauses(self):
         d = self.flow.advance((
-            DungeonObservation("A", 101, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=2),
-            DungeonObservation("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=3),
+            do("A", 101, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=2),
+            do("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=3),
         ))
         self.assertEqual(d.reason, "shared_battle_round_disagrees")
 
     def test_parallel_mode_allows_different_screens_but_never_inputs(self):
         flow = DungeonFlow("A", "B", dungeon="水果剧团", leader="A", relationship="parallel")
         pair = (
-            DungeonObservation("A", 101, "S", "水果剧团", "MAP", instance_id="IA"),
-            DungeonObservation("B", 202, "S", "水果剧团", "BATTLE", instance_id="IB", auto_battle_active=False),
+            do("A", 101, "S", "水果剧团", "MAP", instance_id="IA"),
+            do("B", 202, "S", "水果剧团", "BATTLE", instance_id="IB", auto_battle_active=False),
         )
         d = flow.advance(pair)
         self.assertEqual(d.status, "waiting")
@@ -176,8 +201,8 @@ class DungeonFlowTests(unittest.TestCase):
     def test_parallel_battle_reports_manual_required(self):
         flow = DungeonFlow("A", "B", dungeon="水果剧团", leader="A", relationship="parallel")
         pair = (
-            DungeonObservation("A", 101, "S", "水果剧团", "COMPLETE", instance_id="IA", result="win"),
-            DungeonObservation("B", 202, "S", "水果剧团", "BATTLE", instance_id="IB", auto_battle_active=False),
+            do("A", 101, "S", "水果剧团", "COMPLETE", instance_id="IA", result="win"),
+            do("B", 202, "S", "水果剧团", "BATTLE", instance_id="IB", auto_battle_active=False),
         )
         d = flow.advance(pair)
         self.assertEqual((d.action, d.account), ("MANUAL_BATTLE_REQUIRED", "B"))
