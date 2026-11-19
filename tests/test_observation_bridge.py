@@ -1,5 +1,7 @@
 import unittest
 from dataclasses import dataclass
+from io import BytesIO
+from PIL import Image
 from observation_bridge import capture_pair, safe_coop_observations, safe_dungeon_observations
 from gameplay_flows import CoopFlow, DungeonFlow
 
@@ -25,7 +27,12 @@ class FakeProvider:
         return self.rects.get(hwnd)
     def screenshot(self, hwnd):
         self.calls += 1
-        return None if self.fail_capture else b"frame"
+        if self.fail_capture:
+            return None
+        rect = self.rects[hwnd]
+        output = BytesIO()
+        Image.new('RGB', (rect.width, rect.height), 'black').save(output, format='PNG')
+        return output.getvalue()
 
 class TestBridge(unittest.TestCase):
     def setUp(self):
@@ -36,6 +43,20 @@ class TestBridge(unittest.TestCase):
         self.assertEqual(self.p.calls, 4)
         self.assertTrue(all(e.identity_ok and e.geometry_ok and e.two_frames_present for e in ev))
         self.assertTrue(all(not x.stable and not x.identity_ok for x in safe_coop_observations(ev)))
+    def test_malformed_png_fails_closed(self):
+        self.p.screenshot = lambda hwnd: b'frame'
+        ev = capture_pair(self.p, self.bindings)
+        self.assertFalse(any(e.two_frames_present for e in ev))
+
+    def test_wrong_dimensions_fail_closed(self):
+        def wrong_size(hwnd):
+            output = BytesIO()
+            Image.new('RGB', (10, 10)).save(output, format='PNG')
+            return output.getvalue()
+        self.p.screenshot = wrong_size
+        ev = capture_pair(self.p, self.bindings)
+        self.assertFalse(any(e.two_frames_present for e in ev))
+
     def test_pid_swap_fails_closed(self):
         self.p.ids[1] = Ident(1, 202)
         ev = capture_pair(self.p, self.bindings)
