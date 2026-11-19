@@ -1,0 +1,19 @@
+{
+  "iteration": 21,
+  "date": "2026-11-19",
+  "scope": "dual-account dungeon and co-op flow modeling from uploaded recordings and official/community guides",
+  "changes": [
+    "added source-backed dungeon and co-op catalog",
+    "added observation-driven co-op room/match/battle/result state machine",
+    "added shared-room and parallel-instance dungeon state machine",
+    "added explicit opt-in read-only sweep eligibility",
+    "wired gameplay-demo rehearsal into launcher and Windows build smoke gate",
+    "added uploaded-video evidence notes and guide-source/version caveats"
+  ],
+  "offline_tests": "23/23 new flow tests passed",
+  "syntax": "compileall passed",
+  "demo": "coop and dungeon synthetic rehearsals reached COMPLETED with input_enabled=false",
+  "windows_build": "pending_actions_for_this_commit",
+  "game_validation": "not_executed_no_live_windows_two_account_environment",
+  "release": "not_a_game_automation_exe"
+}

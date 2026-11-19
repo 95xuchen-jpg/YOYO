@@ -69,12 +69,16 @@ def execute(mode, *, db=None, title=None, provider=None):
                     'input_enabled': False, 'game_state_verified': False}
         return {'mode': mode, 'status': 'offline_rehearsal_only', 'preflight': after,
                 'rehearsal': rehearsal, 'input_enabled': False, 'game_state_verified': False}
+    if mode == 'gameplay-demo':
+        from gameplay_flows import gameplay_demo
+        return gameplay_demo()
     raise ValueError('unsupported mode')
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
-    parser.add_argument('--mode', required=True, choices=['offline', 'windows-probe', 'windows-gated-offline'])
+    parser.add_argument('--mode', required=True,
+                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'gameplay-demo'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
     parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
     args = parser.parse_args(argv)

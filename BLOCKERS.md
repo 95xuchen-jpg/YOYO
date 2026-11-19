@@ -26,3 +26,12 @@ Use a Windows runner to build and smoke-test the diagnostic entrypoint, then sup
 - Added `dpi_awareness.py` and wired it before `WindowsClientProvider()` in `launcher.py`, addressing a prerequisite for reliable client-area coordinates under mixed DPI scaling. Windows behavior remains unverified.
 - Linux offline test suite: 75/75 pass; launcher offline smoke passes. No Windows EXE was built.
 - Highest priority remains executing the existing `build_windows.ps1` on an authorized Windows runner and checking the resulting EXE, rather than adding game features.
+
+## Iteration 21 / 2026-11-19 — dungeon and co-op state model
+- Added `gameplay_flows.py`: source-backed dungeon catalog; 2-account co-op room/join/match/battle/result state machine; shared-room and parallel-instance dungeon state machine; monotonic objective progress; state-stall and identity/geometry/server mismatch pause paths; sweep opt-in assessment.
+- Added 23 unit tests covering state transitions, room/match ID mismatch, one-window-only battle, unstable observations, daily reward exhaustion, objective regression, timeout, and explicit sweep gating.
+- Added `--mode gameplay-demo`; synthetic co-op and dungeon rehearsals reach COMPLETED while `input_enabled=false`.
+- `build_windows.ps1` now includes a smoke gate for the new gameplay rehearsal. This commit still builds the read-only diagnostic EXE; it does not click or control the game.
+- Uploaded `双人自动协力.mp4` and `水果剧团.mp4` were frame-sampled. The remaining eight dungeon videos have not yet had detailed per-stage extraction. The co-op video demonstrates 2–4 player setup, 1/2 -> 2/2 room, matching success; its later one-window battle/other-window room-list discrepancy is explicitly fail-closed.
+- TapTap 9/1, 9/15, 10/13 and 11/17 notices were checked; Bilibili search found a current 100+ daily guide and older dungeon recordings, but no unverified old-version route is hardcoded.
+- Remaining P0: real game screenshot recognition, coordinate/viewport calibration, a safe and validated Windows input adapter, and actual two-account test. The original v1.0.6 `pln_minigame` core remains unavailable; V2 is a clean-room parallel implementation, not an upgrade of the original EXE.

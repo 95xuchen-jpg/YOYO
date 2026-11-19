@@ -33,6 +33,13 @@ $gatedReport = $gated | Out-String | ConvertFrom-Json
 if ($gatedReport.status -ne 'paused' -or $gatedReport.input_enabled -ne $false -or $gatedReport.game_state_verified -ne $false) {
   throw 'Unsafe gated behavior: missing title must pause without enabling input or verifying game'
 }
+$flow = & $exe --mode gameplay-demo 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Gameplay flow rehearsal failed: $flow" }
+$flowReport = $flow | Out-String | ConvertFrom-Json
+if ($flowReport.input_enabled -ne $false -or $flowReport.game_state_verified -ne $false -or
+    $flowReport.coop[-1].phase -ne 'COMPLETED' -or $flowReport.dungeon[-1].phase -ne 'COMPLETED') {
+  throw 'Gameplay flow rehearsal did not complete safely or attempted to enable input'
+}
 if ($null -eq $report -or $report.window_preflight -eq $null) { throw 'Smoke JSON missing window_preflight' }
 $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
 $manifest = [ordered]@{
@@ -40,7 +47,7 @@ $manifest = [ordered]@{
   sha256 = $hash
   bytes = (Get-Item $exe).Length
   build_utc = [DateTime]::UtcNow.ToString('o')
-  test_scope = 'Windows offline simulation, fail-closed probe and gated-entrypoint negative smokes, and Python unit tests'
+  test_scope = 'Windows offline simulation, fail-closed probe/gated-entrypoint negative smokes, gameplay flow rehearsal, and Python unit tests'
   game_tested = $false
   automation_enabled = $false
   result = 'diagnostic_only'
