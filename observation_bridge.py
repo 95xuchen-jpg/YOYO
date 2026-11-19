@@ -5,6 +5,8 @@ does not infer game screen, room, match, instance or account from opaque pixels.
 No keyboard or mouse actions are provided.
 """
 from dataclasses import dataclass
+from io import BytesIO
+from PIL import Image
 from gameplay_flows import CoopObservation, DungeonObservation
 
 
@@ -16,6 +18,22 @@ class CaptureEvidence:
     identity_ok: bool
     geometry_ok: bool
     two_frames_present: bool
+
+
+def _valid_png(frame, rect):
+    """Decode PNG fully and require exact physical client-area pixel dimensions."""
+    if not isinstance(frame, bytes) or not frame.startswith(b'\\x89PNG\\r\\n\\x1a\\n'):
+        return False
+    if rect is None or rect.width <= 0 or rect.height <= 0:
+        return False
+    try:
+        with Image.open(BytesIO(frame)) as img:
+            if img.format != 'PNG' or img.size != (rect.width, rect.height):
+                return False
+            img.load()  # Reject truncated or malformed image payloads.
+        return True
+    except (OSError, ValueError, SyntaxError):
+        return False
 
 
 def capture_pair(provider, bindings):
@@ -36,12 +54,12 @@ def capture_pair(provider, bindings):
             first = provider.screenshot(hwnd) if before is not None else None
             middle_id = provider.identity(hwnd)
             middle = provider.client_rect(hwnd)
-            second = provider.screenshot(hwnd) if first and middle == before else None
+            second = provider.screenshot(hwnd) if _valid_png(first, before) and middle == before else None
             after_id = provider.identity(hwnd)
             after = provider.client_rect(hwnd)
             valid_identity = all(x is not None and x.hwnd == hwnd and x.pid == pid and x == before_id for x in (before_id, middle_id, after_id))
             valid_geometry = before is not None and before == middle == after and before.width > 0 and before.height > 0
-            frames = bool(first) and bool(second)
+            frames = _valid_png(first, before) and _valid_png(second, after)
             snapshots.append((before_id, before))
         except Exception:
             snapshots.append((None, None))
