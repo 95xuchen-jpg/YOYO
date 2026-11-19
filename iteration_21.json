@@ -13,7 +13,7 @@
   "offline_tests": "23/23 new flow tests passed",
   "syntax": "compileall passed",
   "demo": "coop and dungeon synthetic rehearsals reached COMPLETED with input_enabled=false",
-  "windows_build": "pending_actions_for_this_commit",
+  "windows_build": "passed: GitHub Actions run 44426926017 on Windows Server 2022; 115/115 tests; offline, fail-closed, and gameplay-demo smoke gates passed; diagnostic EXE SHA256 750b3bbd7ba5e63b990487a2c1b825eecac63bc54deec03209a6b1e2c5672ee1",
   "game_validation": "not_executed_no_live_windows_two_account_environment",
-  "release": "not_a_game_automation_exe"
+  "release": "diagnostic_only_not_game_automation"
 }
