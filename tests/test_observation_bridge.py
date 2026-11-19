@@ -47,6 +47,7 @@ class TestBridge(unittest.TestCase):
         self.p.screenshot = lambda hwnd: b'frame'
         ev = capture_pair(self.p, self.bindings)
         self.assertFalse(any(e.two_frames_present for e in ev))
+        self.assertFalse(any(e.geometry_ok for e in ev))
 
     def test_wrong_dimensions_fail_closed(self):
         def wrong_size(hwnd):
@@ -56,6 +57,7 @@ class TestBridge(unittest.TestCase):
         self.p.screenshot = wrong_size
         ev = capture_pair(self.p, self.bindings)
         self.assertFalse(any(e.two_frames_present for e in ev))
+        self.assertFalse(any(e.geometry_ok for e in ev))
 
     def test_pid_swap_fails_closed(self):
         self.p.ids[1] = Ident(1, 202)
