@@ -22,7 +22,7 @@ class CaptureEvidence:
 
 def _valid_png(frame, rect):
     """Decode PNG fully and require exact physical client-area pixel dimensions."""
-    if not isinstance(frame, bytes) or not frame.startswith(b'\\x89PNG\\r\\n\\x1a\\n'):
+    if not isinstance(frame, bytes) or not frame.startswith(bytes((137,80,78,71,13,10,26,10))):
         return False
     if rect is None or rect.width <= 0 or rect.height <= 0:
         return False
