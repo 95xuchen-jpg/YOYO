@@ -74,7 +74,7 @@ def capture_pair(provider, bindings):
             still_valid = False
         final.append(CaptureEvidence(item.account_id, item.hwnd, item.pid,
                                      item.identity_ok and still_valid,
-                                     item.geometry_ok and still_valid,
+                                     item.geometry_ok and still_valid and item.two_frames_present,
                                      item.two_frames_present))
     return tuple(final)
 
