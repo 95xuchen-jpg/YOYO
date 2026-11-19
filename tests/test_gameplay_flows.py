@@ -91,6 +91,14 @@ class CoopFlowTests(unittest.TestCase):
         ))
         self.assertEqual((d.status, d.reason), ("paused", "co_op_room_id_mismatch"))
 
+    def test_account_hwnd_swap_pauses(self):
+        self.flow.advance(self.pair("COOP_HOME"))
+        swapped = (
+            co("A", 202, "S", "COOP_HOME", mode="协力对战"),
+            co("B", 101, "S", "COOP_HOME", mode="协力对战"),
+        )
+        self.assertEqual(self.flow.advance(swapped).reason, "account_window_binding_changed")
+
     def test_wrong_server_pauses(self):
         pair = self.pair("COOP_HOME")
         pair = (pair[0], co("B", 202, "OTHER", "COOP_HOME", mode="协力对战"))
@@ -167,6 +175,14 @@ class DungeonFlowTests(unittest.TestCase):
     def test_shared_room_membership_mismatch_pauses(self):
         d = self.flow.advance(self.pair("ROOM", room_id="R", room_owner="A", room_members=("A",)))
         self.assertEqual(d.reason, "shared_room_membership_unverified")
+
+    def test_dungeon_account_hwnd_swap_pauses(self):
+        self.flow.advance(self.pair("ROOM", room_id="R", room_owner="A", room_members=("A", "B")))
+        swapped = (
+            do("A", 202, "S", "勇闯火焰山", "LOADING", instance_id="I"),
+            do("B", 101, "S", "勇闯火焰山", "LOADING", instance_id="I"),
+        )
+        self.assertEqual(self.flow.advance(swapped).reason, "account_window_binding_changed")
 
     def test_shared_instance_mismatch_pauses(self):
         d = self.flow.advance((
