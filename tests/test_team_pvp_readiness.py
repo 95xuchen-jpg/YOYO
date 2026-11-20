@@ -54,6 +54,43 @@ class PvpReadinessTests(unittest.TestCase):
                                 CaptureEvidence("alt", 202, 22, True, True, True))
         self.assertEqual(inspect(self.provider(), "Game", 101, 202)["status"], "paused")
 
+    @patch("team_pvp_readiness.capture_pair")
+    def test_window_pid_changes_during_capture_pauses(self, capture):
+        from observation_bridge import CaptureEvidence
+        from windows_provider import WindowIdentity
+        capture.return_value = (CaptureEvidence("main", 101, 11, True, True, True),
+                                CaptureEvidence("alt", 202, 22, True, True, True))
+        p = self.provider()
+        original = {101: WindowIdentity(101, 11, "Game", "Class"),
+                    202: WindowIdentity(202, 22, "Game", "Class")}
+        calls = {101: 0, 202: 0}
+
+        def bind(hwnd):
+            calls[hwnd] += 1
+            if hwnd == 101 and calls[hwnd] > 1:
+                return WindowIdentity(101, 999, "Game", "Class")
+            return original[hwnd]
+
+        p.bind.side_effect = bind
+        result = inspect(p, "Game", 101, 202)
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["reason"], "window_identity_changed_during_capture")
+
+    @patch("team_pvp_readiness.capture_pair")
+    def test_window_set_changes_during_capture_pauses(self, capture):
+        from observation_bridge import CaptureEvidence
+        from windows_provider import WindowIdentity
+        capture.return_value = (CaptureEvidence("main", 101, 11, True, True, True),
+                                CaptureEvidence("alt", 202, 22, True, True, True))
+        p = self.provider()
+        p.discover.side_effect = [
+            [WindowIdentity(101, 11, "Game", "Class"), WindowIdentity(202, 22, "Game", "Class")],
+            [WindowIdentity(101, 11, "Game", "Class"), WindowIdentity(303, 33, "Game", "Class")],
+        ]
+        result = inspect(p, "Game", 101, 202)
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["reason"], "window_set_changed_during_capture")
+
     def test_launcher_rejects_missing_team_pvp_binding(self):
         from launcher import execute
         result = execute("team-pvp-readiness", title="Game")
