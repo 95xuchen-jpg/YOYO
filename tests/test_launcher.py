@@ -39,6 +39,40 @@ class LauncherTests(unittest.TestCase):
         self.assertEqual(result['status'], 'paused')
         self.assertFalse(result['input_enabled'])
 
+    def test_observe_requires_explicit_distinct_handles(self):
+        for main, alt in ((None, None), (101, None), (101, 101), (0, 202), (True, 202)):
+            provider = Mock()
+            result = execute('windows-observe', title='Game', provider=provider,
+                             main_hwnd=main, alt_hwnd=alt)
+            self.assertEqual(result['reason'], 'explicit_distinct_hwnds_required')
+            provider.discover.assert_not_called()
+
+    def test_observe_explicit_order_is_not_hwnd_sort_order(self):
+        provider = Mock()
+        a = WindowIdentity(101, 10, 'Game', 'GameClass')
+        b = WindowIdentity(202, 20, 'Game', 'GameClass')
+        provider.discover.return_value = [a, b]
+        provider.bind.side_effect = lambda hwnd: {101: a, 202: b}[hwnd]
+        provider.identity.side_effect = lambda hwnd: {101: a, 202: b}[hwnd]
+        provider.client_rect.side_effect = lambda hwnd: {101: Rect(0,0,800,600), 202: Rect(800,0,640,480)}[hwnd]
+        provider.screenshot.return_value = b'invalid-png'
+        result = execute('windows-observe', title='Game', provider=provider,
+                         main_hwnd=202, alt_hwnd=101)
+        self.assertEqual([x['account_id'] if 'account_id' in x else x['account'] for x in result.get('captures', [])],
+                         ['main', 'alt'])
+        self.assertEqual([x['hwnd'] for x in result.get('captures', [])], [202, 101])
+        self.assertFalse(result['input_enabled'])
+
+    def test_observe_rejects_unrecognized_handle(self):
+        provider = Mock()
+        provider.discover.return_value = [
+            WindowIdentity(101, 10, 'Game', 'X'),
+            WindowIdentity(202, 20, 'Game', 'X')]
+        result = execute('windows-observe', title='Game', provider=provider,
+                         main_hwnd=101, alt_hwnd=303)
+        self.assertEqual(result['status'], 'paused')
+        provider.screenshot.assert_not_called()
+
     def test_duplicate_pid_pauses(self):
         provider = Mock()
         provider.discover.return_value = [WindowIdentity(1, 10, 'Game', 'X'), WindowIdentity(2, 10, 'Game', 'X')]
