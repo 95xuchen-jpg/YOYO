@@ -54,6 +54,27 @@ class PvpReadinessTests(unittest.TestCase):
                                 CaptureEvidence("alt", 202, 22, True, True, True))
         self.assertEqual(inspect(self.provider(), "Game", 101, 202)["status"], "paused")
 
+    def test_launcher_rejects_missing_team_pvp_binding(self):
+        from launcher import execute
+        result = execute("team-pvp-readiness", title="Game")
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["reason"], "explicit_distinct_hwnds_required")
+        self.assertFalse(result["input_enabled"])
+        self.assertFalse(result["game_state_verified"])
+
+    @patch("team_pvp_readiness.capture_pair")
+    def test_launcher_team_pvp_is_read_only(self, capture):
+        from observation_bridge import CaptureEvidence
+        from launcher import execute
+        capture.return_value = (CaptureEvidence("main", 101, 11, True, True, True),
+                                CaptureEvidence("alt", 202, 22, True, True, True))
+        result = execute("team-pvp-readiness", title="Game",
+                         provider=self.provider(), main_hwnd=101, alt_hwnd=202)
+        self.assertEqual(result["status"], "capture_ready")
+        self.assertEqual(result["reason"], "game_state_unverified")
+        self.assertFalse(result["input_enabled"])
+        self.assertFalse(result["game_state_verified"])
+
 
 if __name__ == "__main__":
     unittest.main()
