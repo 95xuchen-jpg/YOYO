@@ -46,3 +46,15 @@ Use a Windows runner to build and smoke-test the diagnostic entrypoint, then sup
 - Scope remains **read-only diagnostics only**: manifest states `game_tested=false`, `automation_enabled=false`; no live game capture or dual-account test occurred. This is not the requested game-automation EXE and is not an upgrade of v1.0.6.
 - **Scope change:** automatic alchemy, automatic synthesis and automatic material purchasing are cancelled and removed from the development roadmap. Do not add implementation, UI, tests or delivery work for those features. Retain only passive reference/lookup material if useful.
 - Next P0: the bridge validates capture bytes, per-window identity and client geometry but deliberately emits `screen=UNKNOWN` and `stable=false`; a genuine, version-matched screenshot/OCR detector and sanitized replay set are still missing. No mouse/keyboard input adapter or real-game verification is enabled.
+
+
+## Iteration 23 / 2026-11-20 — Slime Habitat video evidence and shared-instance state correction
+- Retrieved and sampled Drive video `史莱姆居地.mp4`: 2560×1440, ~20 fps, 282.1 seconds. The visible build string at the end is `P_CNR_3.0.0_1_154_3.1.25`.
+- Video UI shows level 30, party size 2–12, 15-minute limit; room count 1/12 before the second account joins, then 2/12 at challenge start. Objectives are `击败史莱姆(0/15)` and `击败史莱姆王(0/1)`. Sampled progress was 1/15, 6/15, 12/15, then 15/15 while the boss objective remained 0/1 in the sampled frames.
+- The two clients show different local battle rounds (e.g. 1 vs 4, then 2 vs 4) while the objective counters match; at one point one client is in MAP while the other is in BATTLE. Updated `DungeonFlow`: shared MAP/BATTLE local phases are allowed only with the same verified `instance_id`; objective counters must match when both are present; each BATTLE screen must have its own round value, but the values need not be equal.
+- Updated tests to cover per-account round counters, MAP/BATTLE phase divergence, objective mismatch pause, and missing local round pause.
+- Commit: `b05df7bab65594fd1137468eb172a41ec9c95c04`. Windows Actions run #39 (`44735261768`) passed on `windows-2022`: 137 tests, syntax compilation, PyInstaller build, offline EXE launch, fail-closed negative smokes, gameplay rehearsal, and artifact upload all succeeded.
+- Artifact ID `14628715431`, ZIP size 16,187,193 bytes, ZIP SHA256 `12505621c346839ce98358cd8de315959113af0a1dd55084719e874c9285f4a9`. EXE size 16,378,493 bytes; EXE SHA256 `6a70356b7c356bac6138795416db673132792918b99699de0487f172ce028de4`.
+- Manifest remains `game_tested=false`, `automation_enabled=false`, `result=diagnostic_only`. This is still not the game-automation release. The video does not expose a trustworthy machine-readable instance ID, and at the end only one account has visibly returned to town while the other is loading; do not infer paired completion.
+- Automatic alchemy, synthesis and material purchasing remain cancelled.
+- Next P0: connect a genuine OCR/vision backend to `observation_bridge.py`; until then screen remains UNKNOWN and game state remains unverified. Keep mouse/keyboard input disabled.
