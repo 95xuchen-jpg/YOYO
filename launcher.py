@@ -122,6 +122,24 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             return {'mode': mode, 'status': 'paused', 'reason': 'observation_preflight_failed',
                     'error_type': type(exc).__name__, 'input_enabled': False,
                     'game_state_verified': False}
+    if mode == 'team-pvp-readiness':
+        from team_pvp_readiness import inspect
+        if not title or not title.strip():
+            return {'mode': mode, 'status': 'paused', 'reason': 'explicit_title_required',
+                    'input_enabled': False, 'game_state_verified': False}
+        if type(main_hwnd) is not int or type(alt_hwnd) is not int or main_hwnd <= 0 or alt_hwnd <= 0 or main_hwnd == alt_hwnd:
+            return {'mode': mode, 'status': 'paused', 'reason': 'explicit_distinct_hwnds_required',
+                    'input_enabled': False, 'game_state_verified': False}
+        if provider is None:
+            if os.name != 'nt':
+                return {'mode': mode, 'status': 'unsupported', 'reason': 'requires_windows',
+                        'input_enabled': False, 'game_state_verified': False}
+            from dpi_awareness import enable_per_monitor_dpi
+            from windows_provider import WindowsClientProvider
+            enable_per_monitor_dpi()
+            provider = WindowsClientProvider()
+        result = inspect(provider, title, main_hwnd, alt_hwnd)
+        return {'mode': mode, **result, 'input_enabled': False, 'game_state_verified': False}
     if mode == 'gameplay-demo':
         from gameplay_flows import gameplay_demo
         return gameplay_demo()
@@ -131,7 +149,7 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
-                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo'])
+                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'team-pvp-readiness', 'gameplay-demo'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
     parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
     parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
