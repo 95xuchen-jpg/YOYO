@@ -418,18 +418,25 @@ class DungeonFlow:
                 return self._pause("shared_instance_id_mismatch")
             self.phase = "LOADING"
             return self._decision("waiting", "WAIT_FOR_INSTANCE")
-        if all(o.screen == "MAP" for o in pair):
+        # Shared-instance clients can be in different local sub-phases: one may be
+        # navigating the map while the other resolves its own turn-based encounter.
+        # The recording shows this divergence with the same dungeon objective count.
+        # Keep the shared instance and objective counters strict, but treat battle_round
+        # as account-local rather than requiring the two clients' turn numbers to match.
+        if all(o.screen in ("MAP", "BATTLE") for o in pair):
             if not a.instance_id or a.instance_id != b.instance_id:
-                return self._pause("shared_map_instance_mismatch")
+                return self._pause("shared_active_instance_mismatch")
+            if bool(a.objectives) != bool(b.objectives):
+                return self._pause("shared_objective_observation_missing")
+            if a.objectives and tuple(sorted(a.objectives)) != tuple(sorted(b.objectives)):
+                return self._pause("shared_objective_progress_mismatch")
+            if any(o.screen == "BATTLE" and o.battle_round is None for o in pair):
+                return self._pause("shared_battle_round_unverified")
+            if any(o.screen == "BATTLE" for o in pair):
+                self.phase = "BATTLE"
+                return self._decision("waiting", "WAIT_FOR_BATTLE_RESULT")
             self.phase = "MAP"
             return self._decision("waiting", "WAIT_FOR_OBJECTIVE_PROGRESS")
-        if all(o.screen == "BATTLE" for o in pair):
-            if not a.instance_id or a.instance_id != b.instance_id:
-                return self._pause("shared_battle_instance_mismatch")
-            if a.battle_round is None or a.battle_round != b.battle_round:
-                return self._pause("shared_battle_round_disagrees")
-            self.phase = "BATTLE"
-            return self._decision("waiting", "WAIT_FOR_BATTLE_RESULT")
         if all(o.screen == "REWARD" for o in pair):
             if not a.instance_id or a.instance_id != b.instance_id:
                 return self._pause("shared_reward_instance_mismatch")

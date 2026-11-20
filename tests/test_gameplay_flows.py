@@ -196,12 +196,39 @@ class DungeonFlowTests(unittest.TestCase):
         d = self.flow.advance(self.pair("MAP", instance_id="I", objectives=(("目标", 1, 3),)))
         self.assertEqual(d.reason, "objective_progress_regressed_or_changed")
 
-    def test_shared_battle_round_disagreement_pauses(self):
+    def test_shared_battle_allows_account_local_round_counters(self):
         d = self.flow.advance((
             do("A", 101, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=2),
-            do("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=3),
+            do("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=4),
         ))
-        self.assertEqual(d.reason, "shared_battle_round_disagrees")
+        self.assertEqual((d.phase, d.action), ("BATTLE", "WAIT_FOR_BATTLE_RESULT"))
+        self.assertFalse(d.input_enabled)
+
+    def test_shared_instance_allows_map_battle_phase_divergence(self):
+        objectives = (("击败史莱姆", 12, 15), ("击败史莱姆王", 0, 1))
+        d = self.flow.advance((
+            do("A", 101, "S", "勇闯火焰山", "MAP", instance_id="I", objectives=objectives),
+            do("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I",
+               battle_round=4, objectives=objectives),
+        ))
+        self.assertEqual((d.phase, d.action), ("BATTLE", "WAIT_FOR_BATTLE_RESULT"))
+        self.assertFalse(d.input_enabled)
+
+    def test_shared_objective_progress_mismatch_pauses(self):
+        d = self.flow.advance((
+            do("A", 101, "S", "勇闯火焰山", "MAP", instance_id="I",
+               objectives=(("击败史莱姆", 12, 15),)),
+            do("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I",
+               battle_round=4, objectives=(("击败史莱姆", 11, 15),)),
+        ))
+        self.assertEqual(d.reason, "shared_objective_progress_mismatch")
+
+    def test_shared_battle_requires_local_round_observation(self):
+        d = self.flow.advance((
+            do("A", 101, "S", "勇闯火焰山", "BATTLE", instance_id="I", battle_round=2),
+            do("B", 202, "S", "勇闯火焰山", "BATTLE", instance_id="I"),
+        ))
+        self.assertEqual(d.reason, "shared_battle_round_unverified")
 
     def test_parallel_mode_allows_different_screens_but_never_inputs(self):
         flow = DungeonFlow("A", "B", dungeon="水果剧团", leader="A", relationship="parallel")
