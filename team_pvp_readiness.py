@@ -31,6 +31,11 @@ def inspect(provider, title, main_hwnd, alt_hwnd):
                 raise ValueError("window_identity_changed")
             bindings.append((account, hwnd, identity.pid))
         evidence = capture_pair(provider, tuple(bindings))
+        # Never accept capture evidence assigned to the wrong account or window.
+        expected = {(account, hwnd, pid) for account, hwnd, pid in bindings}
+        observed = {(e.account_id, e.hwnd, e.pid) for e in evidence}
+        if len(evidence) != 2 or observed != expected:
+            return {"status": "paused", "reason": "capture_binding_mismatch"}
         if not all(e.identity_ok and e.geometry_ok and e.two_frames_present for e in evidence):
             return {"status": "paused", "reason": "capture_or_identity_unstable",
                     "windows": [e.__dict__ for e in evidence]}
