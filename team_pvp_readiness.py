@@ -36,6 +36,16 @@ def inspect(provider, title, main_hwnd, alt_hwnd):
         observed = {(e.account_id, e.hwnd, e.pid) for e in evidence}
         if len(evidence) != 2 or observed != expected:
             return {"status": "paused", "reason": "capture_binding_mismatch"}
+        # Revalidate both HWND/PID identities *after* the two-frame capture.
+        # Windows may recycle a handle or a client may restart during capture.
+        # A pre-capture bind alone cannot establish post-capture stability.
+        for account, hwnd, pid in bindings:
+            if provider.bind(hwnd) != by_hwnd[hwnd]:
+                return {"status": "paused", "reason": "window_identity_changed_during_capture"}
+        refreshed = provider.discover(title)
+        if (len(refreshed) != 2 or
+                {w.hwnd: w for w in refreshed} != by_hwnd):
+            return {"status": "paused", "reason": "window_set_changed_during_capture"}
         if not all(e.identity_ok and e.geometry_ok and e.two_frames_present for e in evidence):
             return {"status": "paused", "reason": "capture_or_identity_unstable",
                     "windows": [e.__dict__ for e in evidence]}
