@@ -139,7 +139,10 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             enable_per_monitor_dpi()
             provider = WindowsClientProvider()
         result = inspect(provider, title, main_hwnd, alt_hwnd)
-        return {'mode': mode, **result, 'input_enabled': False, 'game_state_verified': False}
+        from team_pvp_observation_bridge import inspect_pvp_phase
+        phase_check = inspect_pvp_phase(result)
+        return {'mode': mode, **result, 'pvp_phase': phase_check,
+                'input_enabled': False, 'game_state_verified': False}
     if mode == 'gameplay-demo':
         from gameplay_flows import gameplay_demo
         return gameplay_demo()
