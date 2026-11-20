@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-def execute(mode, *, db=None, title=None, provider=None):
+def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None):
     if mode == 'offline':
         from runner import simulate, simulate_window_preflight
         import tempfile
@@ -70,6 +70,10 @@ def execute(mode, *, db=None, title=None, provider=None):
         return {'mode': mode, 'status': 'offline_rehearsal_only', 'preflight': after,
                 'rehearsal': rehearsal, 'input_enabled': False, 'game_state_verified': False}
     if mode == 'windows-observe':
+        if (type(main_hwnd) is not int or type(alt_hwnd) is not int or
+                main_hwnd <= 0 or alt_hwnd <= 0 or main_hwnd == alt_hwnd):
+            return {'mode': mode, 'status': 'paused', 'reason': 'explicit_distinct_hwnds_required',
+                    'input_enabled': False, 'game_state_verified': False}
         if not title or not title.strip():
             return {'mode': mode, 'status': 'paused', 'reason': 'explicit_title_required',
                     'input_enabled': False, 'game_state_verified': False}
@@ -87,8 +91,11 @@ def execute(mode, *, db=None, title=None, provider=None):
             windows = provider.discover(title)
             if len(windows) != 2 or len({w.hwnd for w in windows}) != 2 or len({w.pid for w in windows}) != 2:
                 raise ValueError('exactly_two_distinct_windows_required')
-            windows = sorted(windows, key=lambda w: w.hwnd)
-            bindings = tuple((account, w.hwnd, w.pid) for account, w in zip(('main', 'alt'), windows))
+            by_hwnd = {w.hwnd: w for w in windows}
+            if set(by_hwnd) != {main_hwnd, alt_hwnd}:
+                raise ValueError('explicit_window_binding_mismatch')
+            bindings = (('main', main_hwnd, by_hwnd[main_hwnd].pid),
+                        ('alt', alt_hwnd, by_hwnd[alt_hwnd].pid))
             for w in windows:
                 if provider.bind(w.hwnd) != w:
                     raise ValueError('window_binding_changed')
@@ -116,10 +123,13 @@ def main(argv=None):
                         choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'gameplay-demo'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
     parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
+    parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
+    parser.add_argument('--alt-hwnd', type=int, help='Explicit alt-account window handle for read-only observation')
     args = parser.parse_args(argv)
     if args.mode == 'windows-probe' and args.db:
         parser.error('--db is not supported in windows-probe mode')
-    result = execute(args.mode, db=args.db, title=args.title)
+    result = execute(args.mode, db=args.db, title=args.title,
+                     main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get('status') not in ('paused', 'unsupported') else 2
 
