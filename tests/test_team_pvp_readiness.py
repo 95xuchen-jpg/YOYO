@@ -31,8 +31,8 @@ class PvpReadinessTests(unittest.TestCase):
     @patch("team_pvp_readiness.capture_pair")
     def test_good_capture_never_claims_pvp_recognition(self, capture):
         from observation_bridge import CaptureEvidence
-        capture.return_value = (CaptureEvidence("main", 101, 11, True, True, True),
-                                CaptureEvidence("alt", 202, 22, True, True, True))
+        capture.return_value = (CaptureEvidence("main", 202, 22, True, True, True),
+                                CaptureEvidence("alt", 101, 11, True, True, True))
         result = inspect(self.provider(), "Game", 202, 101)
         self.assertEqual(result["status"], "capture_ready")
         self.assertEqual(result["reason"], "game_state_unverified")
