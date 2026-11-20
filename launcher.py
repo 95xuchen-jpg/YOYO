@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 
-def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None):
+def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None):
     if mode == 'offline':
         from runner import simulate, simulate_window_preflight
         import tempfile
@@ -69,7 +69,10 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
                     'input_enabled': False, 'game_state_verified': False}
         return {'mode': mode, 'status': 'offline_rehearsal_only', 'preflight': after,
                 'rehearsal': rehearsal, 'input_enabled': False, 'game_state_verified': False}
-    if mode == 'windows-observe':
+    if mode in ('windows-observe', 'windows-dungeon-observe'):
+        if mode == 'windows-dungeon-observe' and dungeon != '水果剧团':
+            return {'mode': mode, 'status': 'paused', 'reason': 'explicit_fruit_dungeon_required',
+                    'input_enabled': False, 'game_state_verified': False}
         if (type(main_hwnd) is not int or type(alt_hwnd) is not int or
                 main_hwnd <= 0 or alt_hwnd <= 0 or main_hwnd == alt_hwnd):
             return {'mode': mode, 'status': 'paused', 'reason': 'explicit_distinct_hwnds_required',
@@ -85,8 +88,8 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             enable_per_monitor_dpi()
             from windows_provider import WindowsClientProvider
             provider = WindowsClientProvider()
-        from observation_bridge import capture_pair, safe_coop_observations
-        from gameplay_flows import CoopFlow
+        from observation_bridge import capture_pair, safe_coop_observations, safe_dungeon_observations
+        from gameplay_flows import CoopFlow, DungeonFlow
         try:
             windows = provider.discover(title)
             if len(windows) != 2 or len({w.hwnd for w in windows}) != 2 or len({w.pid for w in windows}) != 2:
@@ -100,9 +103,17 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
                 if provider.bind(w.hwnd) != w:
                     raise ValueError('window_binding_changed')
             evidence = capture_pair(provider, bindings)
-            observations = safe_coop_observations(evidence)
-            decision = CoopFlow('main', 'alt', leader='main').advance(observations)
+            if mode == 'windows-dungeon-observe':
+                # Real screenshots are validated above. A detector has not yet
+                # proven either on-screen account identity or dungeon state;
+                # therefore all game observations must remain UNKNOWN.
+                observations = safe_dungeon_observations(evidence, dungeon=dungeon)
+                decision = DungeonFlow('main', 'alt', dungeon=dungeon, leader='main').advance(observations)
+            else:
+                observations = safe_coop_observations(evidence)
+                decision = CoopFlow('main', 'alt', leader='main').advance(observations)
             return {'mode': mode, 'status': 'paused', 'reason': decision.reason,
+                    'dungeon': dungeon if mode == 'windows-dungeon-observe' else None,
                     'captures': [dict(account_id=e.account_id, hwnd=e.hwnd, pid=e.pid,
                                       identity_ok=e.identity_ok, geometry_ok=e.geometry_ok,
                                       two_frames_present=e.two_frames_present) for e in evidence],
@@ -120,16 +131,17 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
-                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'gameplay-demo'])
+                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
     parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
     parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
     parser.add_argument('--alt-hwnd', type=int, help='Explicit alt-account window handle for read-only observation')
+    parser.add_argument('--dungeon', help='Dungeon for read-only observation; currently only 水果剧团')
     args = parser.parse_args(argv)
     if args.mode == 'windows-probe' and args.db:
         parser.error('--db is not supported in windows-probe mode')
     result = execute(args.mode, db=args.db, title=args.title,
-                     main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd)
+                     main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd, dungeon=args.dungeon)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get('status') not in ('paused', 'unsupported') else 2
 

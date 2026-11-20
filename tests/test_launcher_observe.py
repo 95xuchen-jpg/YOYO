@@ -62,5 +62,45 @@ class ObserveEntrypointTests(unittest.TestCase):
         self.assertFalse(result['input_enabled'])
 
 
+    def test_fruit_dungeon_missing_explicit_name_pauses_before_discovery(self):
+        p = self.provider()
+        result = execute('windows-dungeon-observe', title='Game', provider=p,
+                         main_hwnd=101, alt_hwnd=202)
+        self.assertEqual(result['reason'], 'explicit_fruit_dungeon_required')
+        self.assertFalse(result['input_enabled'])
+        p.discover.assert_not_called()
+
+    def test_fruit_dungeon_reads_both_windows_but_never_guesses_game_state(self):
+        p = self.provider()
+        result = execute('windows-dungeon-observe', title='Game', provider=p,
+                         main_hwnd=202, alt_hwnd=101, dungeon='水果剧团')
+        self.assertEqual(result['status'], 'paused')
+        self.assertEqual(result['reason'], 'two_frame_confirmation_missing')
+        self.assertEqual(result['dungeon'], '水果剧团')
+        self.assertEqual([x['hwnd'] for x in result['captures']], [202, 101])
+        self.assertEqual(p.screenshot.call_count, 4)
+        self.assertTrue(all(x['two_frames_present'] for x in result['captures']))
+        self.assertFalse(result['input_enabled'])
+        self.assertFalse(result['game_state_verified'])
+
+    def test_fruit_dungeon_bad_frame_pauses(self):
+        p = self.provider()
+        p.screenshot.side_effect = lambda hwnd: b'bad-frame'
+        result = execute('windows-dungeon-observe', title='Game', provider=p,
+                         main_hwnd=101, alt_hwnd=202, dungeon='水果剧团')
+        self.assertEqual(result['status'], 'paused')
+        self.assertFalse(any(x['two_frames_present'] for x in result['captures']))
+        self.assertFalse(result['input_enabled'])
+
+    def test_fruit_dungeon_rejects_mismatched_account_window(self):
+        p = self.provider()
+        result = execute('windows-dungeon-observe', title='Game', provider=p,
+                         main_hwnd=101, alt_hwnd=999, dungeon='水果剧团')
+        self.assertEqual(result['status'], 'paused')
+        self.assertEqual(result['reason'], 'observation_preflight_failed')
+        p.screenshot.assert_not_called()
+
+
+
 if __name__ == '__main__':
     unittest.main()

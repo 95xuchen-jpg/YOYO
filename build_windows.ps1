@@ -33,6 +33,15 @@ $gatedReport = $gated | Out-String | ConvertFrom-Json
 if ($gatedReport.status -ne 'paused' -or $gatedReport.input_enabled -ne $false -or $gatedReport.game_state_verified -ne $false) {
   throw 'Unsafe gated behavior: missing title must pause without enabling input or verifying game'
 }
+# Fruit-dungeon observer must reject missing binding with a nonzero exit code.
+$fruit = & $exe --mode windows-dungeon-observe --dungeon '水果剧团' --title 'Game' 2>&1
+$fruitExit = $LASTEXITCODE
+if ($fruitExit -ne 2) { throw "Unsafe fruit observer: missing HWND must exit 2, got $fruitExit" }
+$fruitReport = $fruit | Out-String | ConvertFrom-Json
+if ($fruitReport.status -ne 'paused' -or $fruitReport.reason -ne 'explicit_distinct_hwnds_required' -or
+    $fruitReport.input_enabled -ne $false -or $fruitReport.game_state_verified -ne $false) {
+  throw 'Unsafe fruit observer: missing HWND must fail closed'
+}
 $flow = & $exe --mode gameplay-demo 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Gameplay flow rehearsal failed: $flow" }
 $flowReport = $flow | Out-String | ConvertFrom-Json
