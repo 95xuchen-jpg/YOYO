@@ -39,6 +39,15 @@ class PvpReadinessTests(unittest.TestCase):
         self.assertEqual([w["hwnd"] for w in result["windows"]], [202, 101])
 
     @patch("team_pvp_readiness.capture_pair")
+    def test_swapped_capture_account_is_rejected(self, capture):
+        from observation_bridge import CaptureEvidence
+        capture.return_value = (CaptureEvidence("main", 101, 11, True, True, True),
+                                CaptureEvidence("alt", 202, 22, True, True, True))
+        result = inspect(self.provider(), "Game", 202, 101)
+        self.assertEqual(result["status"], "paused")
+        self.assertEqual(result["reason"], "capture_binding_mismatch")
+
+    @patch("team_pvp_readiness.capture_pair")
     def test_bad_capture_pauses(self, capture):
         from observation_bridge import CaptureEvidence
         capture.return_value = (CaptureEvidence("main", 101, 11, True, False, False),
