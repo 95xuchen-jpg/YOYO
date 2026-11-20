@@ -18,6 +18,24 @@ def inspect_pvp_phase(readiness):
         return {"status": "paused", "reason": "two_capture_records_required",
                 "phase": Phase.UNKNOWN.value, "input_enabled": False,
                 "game_state_verified": False}
+    # Require explicit, non-interchangeable capture identities before consulting
+    # the phase tracker. This is only structural validation, NOT proof of the
+    # on-screen account or game phase.
+    try:
+        accounts = [record.get("account_id") for record in windows]
+        handles = [record.get("hwnd") for record in windows]
+        pids = [record.get("pid") for record in windows]
+        if (any(not isinstance(record, dict) for record in windows)
+                or accounts != ["main", "alt"]
+                or any(type(h) is not int or h <= 0 for h in handles)
+                or len(set(handles)) != 2
+                or any(type(p) is not int or p <= 0 for p in pids)
+                or len(set(pids)) != 2):
+            raise ValueError("invalid capture identity")
+    except (AttributeError, TypeError, ValueError):
+        return {"status": "paused", "reason": "capture_identity_mismatch",
+                "phase": Phase.UNKNOWN.value, "input_enabled": False,
+                "game_state_verified": False}
     # Identity/geometry evidence is still not a trustworthy game-phase label.
     # Never synthesize a session ID, evidence ID, or phase from window handles.
     observations = (
