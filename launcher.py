@@ -143,7 +143,61 @@ def write_session_log(result, *, log_dir=None):
     return path
 
 
+
+def launch_readonly_gui():
+    """Double-clickable diagnostic interface; deliberately no game input."""
+    import tkinter as tk
+    from tkinter import ttk
+    root = tk.Tk()
+    root.title('YOYO 双账号助手 - 只读诊断版（未验证游戏）')
+    root.geometry('760x500')
+    root.minsize(600, 400)
+    frame = ttk.Frame(root, padding=14)
+    frame.pack(fill='both', expand=True)
+    ttk.Label(frame, text='只读诊断版：不会组队、点击、战斗或自动通关。', foreground='#9b341f').pack(anchor='w')
+    ttk.Label(frame, text='双击可运行，无需安装 Python。运行结果自动保存至 ~/YOYO_Logs。').pack(anchor='w', pady=(5, 10))
+    output = tk.Text(frame, wrap='word', height=18)
+    output.pack(fill='both', expand=True)
+    output.insert('end', '点击“离线自检”开始。此操作不访问游戏窗口。\\n')
+    output.configure(state='disabled')
+
+    def run_offline():
+        button.configure(state='disabled')
+        root.update_idletasks()
+        try:
+            try:
+                result = execute('offline')
+            except Exception as exc:
+                result = {'mode': 'offline', 'status': 'paused',
+                          'reason': 'unexpected_runtime_error',
+                          'error_type': type(exc).__name__,
+                          'input_enabled': False, 'game_state_verified': False}
+            try:
+                path = write_session_log(result)
+                result['log_path'] = str(path)
+            except OSError as exc:
+                result['status'] = 'paused'
+                result['reason'] = 'log_write_failed'
+                result['log_error'] = type(exc).__name__
+            output.configure(state='normal')
+            output.delete('1.0', 'end')
+            output.insert('end', json.dumps(result, ensure_ascii=False, indent=2))
+            output.configure(state='disabled')
+        finally:
+            button.configure(state='normal')
+
+    bar = ttk.Frame(frame)
+    bar.pack(fill='x', pady=(10, 0))
+    button = ttk.Button(bar, text='离线自检（不操作游戏）', command=run_offline)
+    button.pack(side='left')
+    ttk.Button(bar, text='退出 / 停止诊断', command=root.destroy).pack(side='right')
+    root.mainloop()
+
+
 def main(argv=None):
+    if argv is None and len(sys.argv) == 1:
+        launch_readonly_gui()
+        return 0
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
                         choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo'])
