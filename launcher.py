@@ -156,8 +156,16 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if args.mode == 'windows-probe' and args.db:
         parser.error('--db is not supported in windows-probe mode')
-    result = execute(args.mode, db=args.db, title=args.title,
-                     main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd, dungeon=args.dungeon)
+    try:
+        result = execute(args.mode, db=args.db, title=args.title,
+                         main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd, dungeon=args.dungeon)
+    except Exception as exc:
+        # Unexpected runtime failures must still leave a durable, non-sensitive
+        # diagnostic record instead of silently terminating the frozen EXE.
+        result = {'mode': args.mode, 'status': 'paused',
+                  'reason': 'unexpected_runtime_error',
+                  'error_type': type(exc).__name__,
+                  'input_enabled': False, 'game_state_verified': False}
     try:
         log_path = write_session_log(result, log_dir=args.log_dir)
         result['log_path'] = str(log_path)
