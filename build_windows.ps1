@@ -19,6 +19,15 @@ if (!(Test-Path $exe)) { throw 'No EXE produced' }
 $offline = & $exe --mode offline 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Windows EXE offline smoke failed: $offline" }
 $report = $offline | Out-String | ConvertFrom-Json
+# Verify the frozen EXE actually writes a durable JSONL log, not merely a path.
+if ([string]::IsNullOrWhiteSpace($report.log_path) -or !(Test-Path -LiteralPath $report.log_path)) {
+  throw 'Windows EXE did not create its promised diagnostic LOG'
+}
+$lastLog = Get-Content -LiteralPath $report.log_path -Encoding utf8 | Select-Object -Last 1 | ConvertFrom-Json
+if ($lastLog.mode -ne 'offline' -or $lastLog.input_enabled -ne $false -or
+    $lastLog.game_state_verified -ne $false -or $lastLog.status -ne $report.status) {
+  throw 'Windows EXE LOG missing safety fields or inconsistent with its JSON report'
+}
 $negative = & $exe --mode windows-probe 2>&1
 $negativeExit = $LASTEXITCODE
 if ($negativeExit -ne 2) { throw "Unsafe probe behavior: missing title must exit 2, got $negativeExit" }
