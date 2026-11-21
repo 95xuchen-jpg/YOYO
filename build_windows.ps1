@@ -42,15 +42,11 @@ if ($fruitReport.status -ne 'paused' -or $fruitReport.reason -ne 'explicit_disti
     $fruitReport.input_enabled -ne $false -or $fruitReport.game_state_verified -ne $false) {
   throw 'Unsafe fruit observer: missing HWND must fail closed'
 }
-# Team-PVP readiness must be reachable through the packaged EXE and fail closed.
+# Retired team-PVP mode must be rejected by argparse and never execute.
 $pvp = & $exe --mode team-pvp-readiness --title 'Game' 2>&1
 $pvpExit = $LASTEXITCODE
-if ($pvpExit -ne 2) { throw "Unsafe team PVP readiness: missing HWND must exit 2, got $pvpExit" }
-$pvpReport = $pvp | Out-String | ConvertFrom-Json
-if ($pvpReport.status -ne 'paused' -or $pvpReport.reason -ne 'explicit_distinct_hwnds_required' -or
-    $pvpReport.input_enabled -ne $false -or $pvpReport.game_state_verified -ne $false) {
-  throw 'Unsafe team PVP readiness: missing HWND did not fail closed'
-}
+if ($pvpExit -eq 0) { throw 'Retired team-PVP mode was unexpectedly accepted' }
+if (($pvp | Out-String) -notmatch 'invalid choice') { throw 'Retired team-PVP mode was not rejected by argument validation' }
 $flow = & $exe --mode gameplay-demo 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Gameplay flow rehearsal failed: $flow" }
 $flowReport = $flow | Out-String | ConvertFrom-Json
@@ -65,7 +61,7 @@ $manifest = [ordered]@{
   sha256 = $hash
   bytes = (Get-Item $exe).Length
   build_utc = [DateTime]::UtcNow.ToString('o')
-  test_scope = 'Windows offline simulation, fail-closed probe/gated-entrypoint/team-PVP negative smokes, gameplay flow rehearsal, and Python unit tests'
+  test_scope = 'Windows offline simulation, fail-closed probe/gated-entrypoint and retired-PVP rejection smokes, gameplay flow rehearsal, and Python unit tests'
   game_tested = $false
   automation_enabled = $false
   result = 'diagnostic_only'
