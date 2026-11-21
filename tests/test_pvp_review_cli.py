@@ -22,6 +22,14 @@ class ReviewCliTests(unittest.TestCase):
         p["records"][0]["reviewed"] = False
         self.assertEqual(review_payload(p)["status"], "paused")
 
+    def test_truthy_string_review_does_not_pass(self):
+        p = pair()
+        p["records"][0]["reviewed"] = "false"
+        self.assertEqual(review_payload(p)["status"], "paused")
+
+    def test_offline_review_never_claims_live_verification(self):
+        self.assertFalse(review_payload(pair())["game_state_verified"])
+
     def test_conflicting_phase_pauses(self):
         p = pair()
         p["records"][1]["phase"] = "BATTLE"
