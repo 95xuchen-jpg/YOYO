@@ -20,6 +20,10 @@ class LauncherTests(unittest.TestCase):
             self.assertFalse(events[0]['input_enabled'])
             self.assertFalse(events[0]['game_state_verified'])
 
+    def test_retired_pvp_mode_cannot_be_invoked(self):
+        with self.assertRaisesRegex(ValueError, 'unsupported mode'):
+            execute('team-pvp-readiness', title='Game', main_hwnd=101, alt_hwnd=202)
+
     def test_offline_full_chain(self):
         result = execute('offline')
         self.assertEqual(result['mode'], 'offline_simulation_only')
