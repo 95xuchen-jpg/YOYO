@@ -7,6 +7,7 @@ import multiprocessing
 import json
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -149,6 +150,20 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
     raise ValueError('unsupported mode')
 
 
+def write_session_log(result, *, log_dir=None):
+    """Persist a diagnostic JSONL event without recording passwords or screenshots."""
+    root = Path(log_dir) if log_dir else Path.home() / 'YOYO_Logs'
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / ('session_' + datetime.now(timezone.utc).strftime('%Y%m%d') + '.log')
+    event = {'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+             'mode': result.get('mode'), 'status': result.get('status'),
+             'reason': result.get('reason'), 'input_enabled': False,
+             'game_state_verified': False, 'details': result}
+    with path.open('a', encoding='utf-8') as stream:
+        stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
+    return path
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
@@ -158,11 +173,19 @@ def main(argv=None):
     parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
     parser.add_argument('--alt-hwnd', type=int, help='Explicit alt-account window handle for read-only observation')
     parser.add_argument('--dungeon', help='Dungeon for read-only observation; currently only 水果剧团')
+    parser.add_argument('--log-dir', help='Optional folder for automatic diagnostic LOG files')
     args = parser.parse_args(argv)
     if args.mode == 'windows-probe' and args.db:
         parser.error('--db is not supported in windows-probe mode')
     result = execute(args.mode, db=args.db, title=args.title,
                      main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd, dungeon=args.dungeon)
+    try:
+        log_path = write_session_log(result, log_dir=args.log_dir)
+        result['log_path'] = str(log_path)
+    except OSError as exc:
+        result['log_error'] = type(exc).__name__
+        result['status'] = 'paused'
+        result['reason'] = 'log_write_failed'
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result.get('status') not in ('paused', 'unsupported') else 2
 
