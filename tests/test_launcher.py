@@ -2,7 +2,9 @@ import unittest
 import tempfile
 import json
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from io import StringIO
+from launcher import main
 from launcher import execute, write_session_log
 from windows_provider import WindowIdentity
 from core import Rect
@@ -19,6 +21,20 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(events[0]['reason'], 'two_frame_confirmation_missing')
             self.assertFalse(events[0]['input_enabled'])
             self.assertFalse(events[0]['game_state_verified'])
+
+    def test_unexpected_error_fails_closed_and_writes_log(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = StringIO()
+            with patch('launcher.execute', side_effect=RuntimeError('sensitive details')), patch('sys.stdout', output):
+                code = main(['--mode', 'offline', '--log-dir', directory])
+            self.assertEqual(code, 2)
+            report = json.loads(output.getvalue())
+            self.assertEqual(report['reason'], 'unexpected_runtime_error')
+            self.assertEqual(report['error_type'], 'RuntimeError')
+            self.assertNotIn('sensitive details', output.getvalue())
+            event = json.loads(Path(report['log_path']).read_text(encoding='utf-8').splitlines()[-1])
+            self.assertFalse(event['input_enabled'])
+            self.assertFalse(event['game_state_verified'])
 
     def test_retired_pvp_mode_cannot_be_invoked(self):
         with self.assertRaisesRegex(ValueError, 'unsupported mode'):
