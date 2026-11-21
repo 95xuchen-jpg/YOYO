@@ -1,10 +1,25 @@
 import unittest
+import tempfile
+import json
+from pathlib import Path
 from unittest.mock import Mock
-from launcher import execute
+from launcher import execute, write_session_log
 from windows_provider import WindowIdentity
 from core import Rect
 
 class LauncherTests(unittest.TestCase):
+    def test_session_log_appends_machine_readable_events(self):
+        with tempfile.TemporaryDirectory() as directory:
+            result = {'mode': 'windows-dungeon-observe', 'status': 'paused',
+                      'reason': 'two_frame_confirmation_missing', 'input_enabled': False}
+            path = write_session_log(result, log_dir=directory)
+            write_session_log(result, log_dir=directory)
+            events = [json.loads(line) for line in Path(path).read_text(encoding='utf-8').splitlines()]
+            self.assertEqual(len(events), 2)
+            self.assertEqual(events[0]['reason'], 'two_frame_confirmation_missing')
+            self.assertFalse(events[0]['input_enabled'])
+            self.assertFalse(events[0]['game_state_verified'])
+
     def test_offline_full_chain(self):
         result = execute('offline')
         self.assertEqual(result['mode'], 'offline_simulation_only')
