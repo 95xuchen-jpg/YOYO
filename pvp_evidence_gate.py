@@ -40,7 +40,7 @@ def inspect_pair(records):
     for x in records:
         hashes = x.frame_hashes
         if (not isinstance(x.phase, Phase) or x.phase is Phase.UNKNOWN
-            or not x.reviewed or not isinstance(x.session_id, str) or not x.session_id.strip()
+            or x.reviewed is not True or not isinstance(x.session_id, str) or not x.session_id.strip()
             or not isinstance(hashes, tuple) or len(hashes) != 2
             or any(not isinstance(h, str) or len(h) != 64 or any(c not in "0123456789abcdef" for c in h) for h in hashes)
             or hashes[0] == hashes[1]):
@@ -49,4 +49,4 @@ def inspect_pair(records):
         return {**paused, "reason": "phase_or_session_conflict"}
     return {"status": "observed", "phase": a.phase.value,
             "reason": "reviewed_offline_evidence_only",
-            "input_enabled": False, "game_state_verified": True}
+            "input_enabled": False, "game_state_verified": False}
