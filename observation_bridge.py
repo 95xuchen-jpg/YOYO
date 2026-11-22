@@ -18,6 +18,7 @@ class CaptureEvidence:
     identity_ok: bool
     geometry_ok: bool
     two_frames_present: bool
+    screen: str = "UNKNOWN"
 
 
 def _valid_png(frame, rect):
@@ -36,7 +37,7 @@ def _valid_png(frame, rect):
         return False
 
 
-def capture_pair(provider, bindings):
+def capture_pair(provider, bindings, classifier=None):
     """Capture bound (account, hwnd, pid) pairs; reject any identity/geometry drift.
 
     A provider must implement identity(hwnd), client_rect(hwnd), screenshot(hwnd).
@@ -47,6 +48,7 @@ def capture_pair(provider, bindings):
     evidence = []
     snapshots = []
     for account, hwnd, pid in bindings:
+        screen = "UNKNOWN"
         valid_identity = valid_geometry = frames = False
         try:
             before_id = provider.identity(hwnd)
@@ -60,10 +62,14 @@ def capture_pair(provider, bindings):
             valid_identity = all(x is not None and x.hwnd == hwnd and x.pid == pid and x == before_id for x in (before_id, middle_id, after_id))
             valid_geometry = before is not None and before == middle == after and before.width > 0 and before.height > 0
             frames = _valid_png(first, before) and _valid_png(second, after)
+            if classifier and valid_identity and valid_geometry and frames:
+                candidate = classifier(first)
+                if candidate != "UNKNOWN" and candidate == classifier(second):
+                    screen = candidate
             snapshots.append((before_id, before))
         except Exception:
             snapshots.append((None, None))
-        evidence.append(CaptureEvidence(account, hwnd, pid, valid_identity, valid_geometry, frames))
+        evidence.append(CaptureEvidence(account, hwnd, pid, valid_identity, valid_geometry, frames, screen))
     # Recheck both windows after both capture sequences to catch cross-window drift.
     final = []
     for item, (identity, rect) in zip(evidence, snapshots):
@@ -75,7 +81,7 @@ def capture_pair(provider, bindings):
         final.append(CaptureEvidence(item.account_id, item.hwnd, item.pid,
                                      item.identity_ok and still_valid,
                                      item.geometry_ok and still_valid and item.two_frames_present,
-                                     item.two_frames_present))
+                                     item.two_frames_present, item.screen if still_valid else "UNKNOWN"))
     return tuple(final)
 
 

@@ -108,22 +108,27 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             for w in windows:
                 if provider.bind(w.hwnd) != w:
                     raise ValueError('window_binding_changed')
-            evidence = capture_pair(provider, bindings)
+            from fruit_screen import classify
+            evidence = capture_pair(provider, bindings, classifier=classify if dungeon == '水果剧团' else None)
             if mode == 'windows-dungeon-observe':
-                # Real screenshots are validated above. A detector has not yet
-                # proven either on-screen account identity or dungeon state;
-                # therefore all game observations must remain UNKNOWN.
+                # Panel labels alone do not establish account or instance identity.
                 observations = safe_dungeon_observations(evidence, dungeon=dungeon)
                 decision = DungeonFlow('main', 'alt', dungeon=dungeon, leader='main').advance(observations)
             else:
                 observations = safe_coop_observations(evidence)
                 decision = CoopFlow('main', 'alt', leader='main').advance(observations)
-            return {'mode': mode, 'status': 'paused', 'reason': decision.reason,
+            report = {'mode': mode, 'status': 'paused', 'reason': decision.reason,
                     'dungeon': dungeon if mode == 'windows-dungeon-observe' else None,
                     'captures': [dict(account_id=e.account_id, hwnd=e.hwnd, pid=e.pid,
                                       identity_ok=e.identity_ok, geometry_ok=e.geometry_ok,
-                                      two_frames_present=e.two_frames_present) for e in evidence],
+                                      two_frames_present=e.two_frames_present, screen=e.screen) for e in evidence],
                     'input_enabled': False, 'game_state_verified': False}
+            if mode == 'windows-dungeon-observe':
+                labels = {'OBJECTIVES': '水果剧团任务面板', 'REWARD_PANEL': '副本领奖提示', 'UNKNOWN': '画面未识别'}
+                report['画面识别'] = {e.account_id: labels[e.screen] for e in evidence}
+                if any(e.screen != 'UNKNOWN' for e in evidence):
+                    report['reason'] = 'visible_panel_observed'
+            return report
         except Exception as exc:
             return {'mode': mode, 'status': 'paused', 'reason': 'observation_preflight_failed',
                     'error_type': type(exc).__name__, 'input_enabled': False,
@@ -208,7 +213,7 @@ def launch_readonly_gui():
 
     ttk.Button(selector, text='查找双窗口', command=refresh).pack(side='left')
     output = tk.Text(frame, wrap='word', height=18)
-    output.pack(fill='both', expand=True)
+    # Reserve space for controls before allocating the expanding results area.
     output.insert('end', '点击“离线自检”开始。此操作不访问游戏窗口。\\n')
     output.configure(state='disabled')
 
@@ -284,7 +289,8 @@ def launch_readonly_gui():
             alt_hwnd=alt.hwnd, dungeon='水果剧团', expected_windows=(main, alt))
 
     bar = ttk.Frame(frame)
-    bar.pack(fill='x', pady=(10, 0))
+    bar.pack(side='bottom', fill='x', pady=(10, 0))
+    output.pack(fill='both', expand=True)
     button = ttk.Button(bar, text='离线自检（不操作游戏）', command=run)
     button.pack(side='left')
     observe_button = ttk.Button(bar, text='水果剧团双窗观察', command=observe)
