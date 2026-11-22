@@ -10,6 +10,7 @@ def evidence(main, alt=None, **kwargs):
 def enter_battle(gate):
     gate.advance(evidence("ROOM_WAITING", same_room_verified=True))
     gate.advance(evidence("FRUIT_LOADING", same_instance_verified=True))
+    gate.advance(evidence("FRUIT_BATTLE", same_instance_verified=True))
 
 
 class FruitSequenceGateTests(unittest.TestCase):
