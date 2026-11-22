@@ -148,6 +148,8 @@ def launch_readonly_gui():
     """Double-clickable diagnostic interface; deliberately no game input."""
     import tkinter as tk
     from tkinter import ttk
+    import threading
+    import queue
     root = tk.Tk()
     root.title('YOYO 双账号助手 - 只读诊断版（未验证游戏）')
     root.geometry('760x500')
@@ -161,9 +163,35 @@ def launch_readonly_gui():
     output.insert('end', '点击“离线自检”开始。此操作不访问游戏窗口。\\n')
     output.configure(state='disabled')
 
-    def run_offline():
-        button.configure(state='disabled')
-        root.update_idletasks()
+    results = queue.Queue()
+    stopped = False
+    running = False
+
+    def close_gui():
+        # Only offline diagnostics run in the worker; no game input exists.
+        # Closing the GUI must not wait for the worker to finish.
+        nonlocal stopped
+        stopped = True
+        root.destroy()
+
+    def poll_result():
+        nonlocal running
+        if stopped:
+            return
+        try:
+            result = results.get_nowait()
+        except queue.Empty:
+            if running:
+                root.after(100, poll_result)
+            return
+        running = False
+        output.configure(state='normal')
+        output.delete('1.0', 'end')
+        output.insert('end', json.dumps(result, ensure_ascii=False, indent=2))
+        output.configure(state='disabled')
+        button.configure(state='normal')
+
+    def offline_worker():
         try:
             try:
                 result = execute('offline')
@@ -179,18 +207,28 @@ def launch_readonly_gui():
                 result['status'] = 'paused'
                 result['reason'] = 'log_write_failed'
                 result['log_error'] = type(exc).__name__
-            output.configure(state='normal')
-            output.delete('1.0', 'end')
-            output.insert('end', json.dumps(result, ensure_ascii=False, indent=2))
-            output.configure(state='disabled')
-        finally:
-            button.configure(state='normal')
+        except Exception as exc:
+            result = {'mode': 'offline', 'status': 'paused',
+                      'reason': 'diagnostic_worker_failed',
+                      'error_type': type(exc).__name__,
+                      'input_enabled': False, 'game_state_verified': False}
+        results.put(result)
+
+    def run_offline():
+        nonlocal running
+        if running or stopped:
+            return
+        running = True
+        button.configure(state='disabled')
+        threading.Thread(target=offline_worker, daemon=True, name='YOYO-offline-diagnostic').start()
+        root.after(100, poll_result)
 
     bar = ttk.Frame(frame)
     bar.pack(fill='x', pady=(10, 0))
     button = ttk.Button(bar, text='离线自检（不操作游戏）', command=run_offline)
     button.pack(side='left')
-    ttk.Button(bar, text='退出 / 停止诊断', command=root.destroy).pack(side='right')
+    ttk.Button(bar, text='退出 / 停止诊断', command=close_gui).pack(side='right')
+    root.protocol('WM_DELETE_WINDOW', close_gui)
     root.mainloop()
 
 
