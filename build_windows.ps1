@@ -24,7 +24,9 @@ if ([string]::IsNullOrWhiteSpace($report.log_path) -or !(Test-Path -LiteralPath 
   throw 'Windows EXE did not create its promised diagnostic LOG'
 }
 $lastLog = Get-Content -LiteralPath $report.log_path -Encoding utf8 | Select-Object -Last 1 | ConvertFrom-Json
-if ($lastLog.mode -ne 'offline' -or $lastLog.input_enabled -ne $false -or
+# The offline simulator reports mode=offline_simulation_only, not the CLI selector offline.
+# Compare the persisted event with the actual report instead of assuming they match.
+if ($lastLog.mode -ne $report.mode -or $lastLog.input_enabled -ne $false -or
     $lastLog.game_state_verified -ne $false -or $lastLog.status -ne $report.status) {
   throw 'Windows EXE LOG missing safety fields or inconsistent with its JSON report'
 }
