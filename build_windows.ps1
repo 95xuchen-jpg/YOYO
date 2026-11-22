@@ -12,7 +12,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
 if ($LASTEXITCODE -ne 0) { throw 'Syntax compilation failed' }
 & $python -m unittest discover -s tests -q
 if ($LASTEXITCODE -ne 0) { throw 'Unit tests failed' }
-& $python -m PyInstaller --noconfirm --clean --onefile --name PLN_ReadOnly_Diagnostics launcher.py
+& $python -m PyInstaller --noconfirm --clean --onefile --hidden-import fruit_replay --hidden-import fruit_sequence_gate --name PLN_ReadOnly_Diagnostics launcher.py
 if ($LASTEXITCODE -ne 0) { throw 'Build failed' }
 $exe = Join-Path $PSScriptRoot 'dist\PLN_ReadOnly_Diagnostics.exe'
 if (!(Test-Path $exe)) { throw 'No EXE produced' }
@@ -30,6 +30,28 @@ if ($lastLog.mode -ne $report.mode -or $lastLog.input_enabled -ne $false -or
     $lastLog.game_state_verified -ne $false -or $lastLog.status -ne $report.status) {
   throw 'Windows EXE LOG missing safety fields or inconsistent with its JSON report'
 }
+# Smoke-test the actual frozen EXE's newly added fruit-replay mode.
+# Without explicit hidden imports PyInstaller may omit modules loaded via import inside execute().
+$fixture = Join-Path $PSScriptRoot 'dist\fruit_replay_ci.jsonl'
+$fixtureEvidence = [ordered]@{
+  main_state = 'ROOM_WAITING'
+  alt_state = 'ROOM_WAITING'
+  main_stable = $true
+  alt_stable = $true
+  same_room_verified = $true
+  same_instance_verified = $false
+  main_reward_specific = $false
+  alt_reward_specific = $false
+}
+$fixtureEvidence | ConvertTo-Json -Compress | Set-Content -LiteralPath $fixture -Encoding utf8
+$fruitReplay = & $exe --mode fruit-replay --db $fixture 2>&1
+if ($LASTEXITCODE -ne 0) { throw "Frozen EXE fruit replay failed: $fruitReplay" }
+$fruitReplayReport = $fruitReplay | Out-String | ConvertFrom-Json
+if ($fruitReplayReport.status -ne 'waiting' -or $fruitReplayReport.input_enabled -ne $false -or
+    $fruitReplayReport.replay_only -ne $true -or $fruitReplayReport.game_state_verified -ne $false) {
+  throw 'Frozen EXE fruit replay smoke failed or enabled input'
+}
+Remove-Item -LiteralPath $fixture -Force
 $negative = & $exe --mode windows-probe 2>&1
 $negativeExit = $LASTEXITCODE
 if ($negativeExit -ne 2) { throw "Unsafe probe behavior: missing title must exit 2, got $negativeExit" }
@@ -72,7 +94,7 @@ $manifest = [ordered]@{
   sha256 = $hash
   bytes = (Get-Item $exe).Length
   build_utc = [DateTime]::UtcNow.ToString('o')
-  test_scope = 'Windows offline simulation, fail-closed probe/gated-entrypoint and retired-PVP rejection smokes, gameplay flow rehearsal, and Python unit tests'
+  test_scope = 'Windows offline simulation, fail-closed probe/gated-entrypoint and retired-PVP rejection smokes, gameplay flow rehearsal, frozen fruit-replay smoke, and Python unit tests'
   game_tested = $false
   automation_enabled_by_default = $false
   opt_in_taught_actions = $true

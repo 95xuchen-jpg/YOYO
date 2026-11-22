@@ -12,6 +12,19 @@ from pathlib import Path
 
 
 def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None, expected_windows=None):
+    if mode == 'fruit-replay':
+        from fruit_replay import replay_jsonl
+        if not db:
+            return {'mode': mode, 'status': 'paused', 'reason': 'explicit_jsonl_required',
+                    'input_enabled': False, 'game_state_verified': False}
+        try:
+            report = replay_jsonl(db)
+        except (OSError, UnicodeError) as exc:
+            return {'mode': mode, 'status': 'paused', 'reason': 'replay_file_unavailable',
+                    'error_type': type(exc).__name__, 'input_enabled': False,
+                    'game_state_verified': False}
+        return {'mode': mode, **report, 'game_state_verified': False,
+                'input_enabled': False, 'replay_only': True}
     if mode == 'offline':
         from runner import simulate, simulate_window_preflight
         import tempfile
@@ -141,19 +154,47 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
     raise ValueError('unsupported mode')
 
 
+_SENSITIVE_LOG_KEYS = frozenset({
+    "password", "passwd", "passcode", "roomcode", "roompin", "pin", "pincode",
+    "secret", "token", "credential", "credentials", "screenshot", "screenshotbytes",
+    "frame", "rawframe", "framebytes", "framedata", "image", "imagebytes", "imagedata",
+})
+
+
+def _sanitize_log_value(value):
+    """Recursively remove credentials and binary captures before JSONL persistence."""
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            normalized = ''.join(ch for ch in str(key).casefold() if ch.isalnum())
+            sensitive = normalized in _SENSITIVE_LOG_KEYS or normalized.startswith((
+                "password", "passwd", "passcode", "roomcode", "roompin",
+                "credential", "secret", "token", "screenshot", "rawframe",
+                "framebytes", "framedata", "imagebytes", "imagedata",
+            ))
+            cleaned[key] = "[REDACTED]" if sensitive else _sanitize_log_value(item)
+        return cleaned
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "[REDACTED_BINARY]"
+    return value
+
+
 def write_session_log(result, *, log_dir=None):
-    """Persist a diagnostic JSONL event without recording passwords or screenshots."""
+    """Persist a diagnostic JSONL event after recursive secret/frame redaction."""
     root = Path(log_dir) if log_dir else Path.home() / 'YOYO_Logs'
     root.mkdir(parents=True, exist_ok=True)
     path = root / ('session_' + datetime.now(timezone.utc).strftime('%Y%m%d') + '.log')
-    event = {'timestamp_utc': datetime.now(timezone.utc).isoformat(),
-             'mode': result.get('mode'), 'status': result.get('status'),
-             'reason': result.get('reason'), 'input_enabled': result.get('input_enabled', False),
-             'game_state_verified': False, 'details': result}
+    event = _sanitize_log_value({
+        'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+        'mode': result.get('mode'), 'status': result.get('status'),
+        'reason': result.get('reason'), 'input_enabled': result.get('input_enabled', False),
+        'game_state_verified': False, 'details': result,
+    })
     with path.open('a', encoding='utf-8') as stream:
         stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
     return path
-
 
 
 def launch_readonly_gui():
@@ -408,9 +449,9 @@ def main(argv=None):
         return 0
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
-                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo'])
+                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo', 'fruit-replay'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
-    parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
+    parser.add_argument('--db', help='SQLite database for offline simulation, or JSONL path for fruit-replay')
     parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
     parser.add_argument('--alt-hwnd', type=int, help='Explicit alt-account window handle for read-only observation')
     parser.add_argument('--dungeon', help='Dungeon for read-only observation; currently only 水果剧团')
