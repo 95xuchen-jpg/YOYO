@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None):
+def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None, expected_windows=None):
     if mode == 'offline':
         from runner import simulate, simulate_window_preflight
         import tempfile
@@ -101,6 +101,8 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             by_hwnd = {w.hwnd: w for w in windows}
             if set(by_hwnd) != {main_hwnd, alt_hwnd}:
                 raise ValueError('explicit_window_binding_mismatch')
+            if expected_windows is not None and (by_hwnd[main_hwnd], by_hwnd[alt_hwnd]) != expected_windows:
+                raise ValueError('selected_windows_changed')
             bindings = (('main', main_hwnd, by_hwnd[main_hwnd].pid),
                         ('alt', alt_hwnd, by_hwnd[alt_hwnd].pid))
             for w in windows:
@@ -153,6 +155,9 @@ def launch_readonly_gui():
     from tkinter import ttk
     import threading
     import queue
+    if os.name == 'nt':
+        from dpi_awareness import enable_per_monitor_dpi
+        enable_per_monitor_dpi()
     root = tk.Tk()
     root.title('YOYO 双账号助手 - 只读诊断版（未验证游戏）')
     root.geometry('760x500')
@@ -161,6 +166,47 @@ def launch_readonly_gui():
     frame.pack(fill='both', expand=True)
     ttk.Label(frame, text='只读诊断版：不会组队、点击、战斗或自动通关。', foreground='#9b341f').pack(anchor='w')
     ttk.Label(frame, text='双击可运行，无需安装 Python。运行结果自动保存至 ~/YOYO_Logs。').pack(anchor='w', pady=(5, 10))
+    from tkinter import messagebox
+    selector = ttk.Frame(frame)
+    selector.pack(fill='x', pady=4)
+    ttk.Label(selector, text='游戏窗口标题关键词').pack(side='left')
+    title = tk.StringVar()
+    ttk.Entry(selector, textvariable=title, width=18).pack(side='left', padx=6)
+    main_choice = ttk.Combobox(frame, state='readonly')
+    ttk.Label(frame, text='选择主号窗口（另一个窗口作为副号）').pack(anchor='w')
+    main_choice.pack(fill='x')
+    choices = {}
+    selected_title = ''
+
+    def refresh():
+        nonlocal selected_title
+        choices.clear()
+        main_choice.set('')
+        main_choice.configure(values=())
+        selected_title = title.get().strip()
+        if not selected_title:
+            messagebox.showinfo('窗口绑定', '请输入两个游戏窗口标题共有的文字。')
+            return
+        try:
+            from windows_provider import WindowsClientProvider
+            provider = WindowsClientProvider()
+            windows = provider.discover(selected_title)
+            if len(windows) != 2 or len({w.pid for w in windows}) != 2:
+                raise ValueError('请打开两个独立的游戏窗口，并缩小标题匹配范围。')
+            for window in windows:
+                if provider.bind(window.hwnd) != window:
+                    raise ValueError('窗口已变化，请刷新。')
+                rect = provider.client_rect(window.hwnd)
+                if rect is None:
+                    raise ValueError('请恢复两个游戏窗口后刷新。')
+                label = f'{window.title}　位置 ({rect.x}, {rect.y})　窗口 {window.hwnd}'
+                choices[label] = window
+            main_choice.configure(values=tuple(choices))
+        except Exception as exc:
+            choices.clear()
+            messagebox.showwarning('窗口绑定', str(exc))
+
+    ttk.Button(selector, text='查找双窗口', command=refresh).pack(side='left')
     output = tk.Text(frame, wrap='word', height=18)
     output.pack(fill='both', expand=True)
     output.insert('end', '点击“离线自检”开始。此操作不访问游戏窗口。\\n')
@@ -193,13 +239,14 @@ def launch_readonly_gui():
         output.insert('end', json.dumps(result, ensure_ascii=False, indent=2))
         output.configure(state='disabled')
         button.configure(state='normal')
+        observe_button.configure(state='normal')
 
-    def offline_worker():
+    def diagnostic_worker(mode, options):
         try:
             try:
-                result = execute('offline')
+                result = execute(mode, **options)
             except Exception as exc:
-                result = {'mode': 'offline', 'status': 'paused',
+                result = {'mode': mode, 'status': 'paused',
                           'reason': 'unexpected_runtime_error',
                           'error_type': type(exc).__name__,
                           'input_enabled': False, 'game_state_verified': False}
@@ -211,25 +258,37 @@ def launch_readonly_gui():
                 result['reason'] = 'log_write_failed'
                 result['log_error'] = type(exc).__name__
         except Exception as exc:
-            result = {'mode': 'offline', 'status': 'paused',
+            result = {'mode': mode, 'status': 'paused',
                       'reason': 'diagnostic_worker_failed',
                       'error_type': type(exc).__name__,
                       'input_enabled': False, 'game_state_verified': False}
         results.put(result)
 
-    def run_offline():
+    def run(mode='offline', **options):
         nonlocal running
         if running or stopped:
             return
         running = True
         button.configure(state='disabled')
-        threading.Thread(target=offline_worker, daemon=True, name='YOYO-offline-diagnostic').start()
+        observe_button.configure(state='disabled')
+        threading.Thread(target=diagnostic_worker, args=(mode, options), daemon=True).start()
         root.after(100, poll_result)
+
+    def observe():
+        main = choices.get(main_choice.get())
+        if not main or len(choices) != 2 or selected_title != title.get().strip():
+            messagebox.showinfo('水果剧团', '请查找双窗口并选择主号。')
+            return
+        alt = next(w for w in choices.values() if w != main)
+        run('windows-dungeon-observe', title=selected_title, main_hwnd=main.hwnd,
+            alt_hwnd=alt.hwnd, dungeon='水果剧团', expected_windows=(main, alt))
 
     bar = ttk.Frame(frame)
     bar.pack(fill='x', pady=(10, 0))
-    button = ttk.Button(bar, text='离线自检（不操作游戏）', command=run_offline)
+    button = ttk.Button(bar, text='离线自检（不操作游戏）', command=run)
     button.pack(side='left')
+    observe_button = ttk.Button(bar, text='水果剧团双窗观察', command=observe)
+    observe_button.pack(side='left', padx=6)
     ttk.Button(bar, text='退出 / 停止诊断', command=close_gui).pack(side='right')
     root.protocol('WM_DELETE_WINDOW', close_gui)
     root.mainloop()
