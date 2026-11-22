@@ -376,8 +376,8 @@ def launch_readonly_gui():
         else:
             alt = next(w for w in choices.values() if w != main)
         if mode != 'windows-dungeon-observe':
-            msg = ('两个角色请先进入同一水果剧团房间，保持游戏窗口完整可见。'
-                   '示教时等待提示，再手动点开始挑战。战斗时仅在自动战斗关闭时手动开启；已经开启则停止示教。'
+            msg = ('可从两号的「日常」面板开始。主号创建私人房间，副号从列表选择同一房主。保持双窗可见。'
+                   '示教时按提示点击。房间密码及确认由你在游戏内完成。战斗时仅在自动战斗关闭时手动开启；已经开启则停止示教。'
                    if mode == '动作示教' else
                    '请核对两个角色、房间及已示教的开关方向。助手将对每个匹配动作最多点击一次。')
             if not messagebox.askokcancel(mode,msg):

@@ -7,11 +7,14 @@ from io import BytesIO
 from time import monotonic
 from PIL import Image, ImageChops, ImageStat
 from fruit_screen import classify
+from room_route import ROUTE, normalized, join_target, ink_agreement
 
 POINTS = {'LEADER_READY': (462, 366), 'FRUIT_BATTLE': (399, 338)}
 LABELS = {'LEADER_READY': '房主可开始挑战', 'ROOM_WAITING': '等待队员',
           'FRUIT_LOADING': '水果剧团加载中', 'FRUIT_BATTLE': '水果剧团战斗中',
-          'FRUIT_DETAILS': '水果剧团详情'}
+          'FRUIT_DETAILS': '水果剧团详情', 'DAILY':'日常任务', 'CATALOG':'副本目录',
+          'CREATE_OPTIONS':'创建房间设置', 'PRIVATE_CREATE':'私人房间设置',
+          'ROOM_LIST':'房间列表', 'PRIVATE_JOIN':'私人房间入房提示'}
 
 
 def patch(frame, state):
@@ -123,6 +126,7 @@ def _observe(provider, windows, teaching, rules, stop, report, armed, seen):
     pending = {}
     previous = {}
     used = set()
+    opened_fruit_settings = False
     end = monotonic()+900
     while monotonic()<end and not stop.is_set():
         for i, window in enumerate(windows):
@@ -139,6 +143,8 @@ def _observe(provider, windows, teaching, rules, stop, report, armed, seen):
             now = monotonic()
             old = previous.get(i)
             previous[i] = (state, rect, frame)
+            if i in pending and now > pending[i][2]:
+                raise ValueError('操作等待超时，请核对游戏画面')
             if old is None or old[0]!=state or old[1]!=rect:
                 continue
             if i in pending:
@@ -147,21 +153,57 @@ def _observe(provider, windows, teaching, rules, stop, report, armed, seen):
                     raise ValueError('未在规定时间观察到操作结果，请重新核对游戏状态')
                 if teaching and k not in seen:
                     continue
-                if changed(k[-1],before,state,frame) and changed(k[-1],before,state,old[2]):
+                route = ROUTE.get((i,k[-1]))
+                expected = route[1] if route else 'PRIVATE_JOIN' if k[-1]=='ROOM_LIST' else None
+                success = (state == expected if expected else
+                           changed(k[-1],before,state,frame) and changed(k[-1],before,state,old[2]))
+                if success:
                     if k[-1]=='FRUIT_BATTLE' and distance(patch(frame,state),patch(old[2],state))>5:
                         continue
                     if not teaching and k[-1]=='FRUIT_BATTLE' and distance(rules[k][1],patch(frame,state))>6:
                         continue
+                    if k[-1]=='FRUIT_DETAILS' and state=='CREATE_OPTIONS':
+                        opened_fruit_settings = True
                     if teaching:
                         after = patch(frame,state) if state=='FRUIT_BATTLE' and k[-1]=='FRUIT_BATTLE' else None
                         rules[k]=(before,after)
                     report(i,'已观察到操作结果',state)
+                    if state in ('PRIVATE_CREATE','PRIVATE_JOIN'):
+                        report(i,'请在游戏内手动输入房间密码并确认，助手会继续观察',state)
                     del pending[i]
                 continue
-            if key in used or state not in POINTS or (state=='LEADER_READY' and i!=0):
+            if key in used:
                 continue
-            before = patch(frame,state)
-            if distance(before,patch(old[2],state))>5:
+            route = ROUTE.get((i,state))
+            dynamic = state=='ROOM_LIST' and i==1
+            if route:
+                if state=='CREATE_OPTIONS' and not opened_fruit_settings:
+                    continue
+                point, _, region, hint = route
+                before = normalized(frame).crop(region)
+                if distance(before,normalized(old[2]).crop(region))>5:
+                    continue
+            elif dynamic:
+                rule = rules.get(key)
+                if not teaching and rule is None:
+                    continue
+                owner = previous.get(0)
+                if owner is None or owner[0]!='ROOM_WAITING':
+                    continue
+                signature = rule[0] if not teaching else None
+                candidate = join_target(frame,signature)
+                prior = join_target(old[2],signature)
+                if not candidate or not prior or prior[0]!=candidate[0] or ink_agreement(candidate[1],prior[1])<0.82:
+                    continue
+                point,before = candidate
+                hint = '核对房主名后，点该私人水果剧团房间右侧的加号'
+            elif state in POINTS and not (state=='LEADER_READY' and i!=0):
+                point = POINTS[state]
+                before = patch(frame,state)
+                if distance(before,patch(old[2],state))>5:
+                    continue
+                hint = '点「开始挑战」' if state=='LEADER_READY' else '确认自动战斗关闭后点「自动战斗」'
+            else:
                 continue
             if state=='LEADER_READY':
                 guest = windows[1]
@@ -176,17 +218,31 @@ def _observe(provider, windows, teaching, rules, stop, report, armed, seen):
                 # enabling a previously disabled native auto-battle control.
                 if state=='FRUIT_BATTLE' and key in rules:
                     continue
-                armed[0] = tuple(armed[0] or ()) + ((key,window.hwnd,rect,POINTS[state]),)
-                report(i,'已记录操作前画面，请手动开始挑战或开启游戏内自动战斗',state)
+                armed[0] = tuple(armed[0] or ()) + ((key,window.hwnd,rect,point),)
+                report(i,'已就绪，请'+hint,state)
             else:
                 rule = rules.get(key)
-                if rule is None or distance(rule[0],before)>6:
+                if rule is None or (not dynamic and distance(rule[0],before)>6):
                     continue
                 if rule[1] is not None and distance(rule[1],before)<24:
                     continue
                 if stop.is_set():
                     return
-                click_client(provider,window,rect,POINTS[state])
+                fresh = provider.screenshot(window.hwnd)
+                if not fresh or classify(fresh)!=state or stop.is_set():
+                    continue
+                if dynamic:
+                    current = join_target(fresh,rule[0])
+                    if not current or current[0]!=point:
+                        continue
+                elif route:
+                    if distance(normalized(fresh).crop(region),before)>5:
+                        continue
+                elif distance(patch(fresh,state),before)>5:
+                    continue
+                if stop.is_set():
+                    return
+                click_client(provider,window,rect,point)
                 report(i,'已向绑定窗口发送一次点击',state)
             pending[i]=(key,before,now+25)
             used.add(key)
