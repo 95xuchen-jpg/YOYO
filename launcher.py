@@ -165,7 +165,7 @@ def launch_readonly_gui():
         enable_per_monitor_dpi()
     root = tk.Tk()
     root.title('YOYO 双账号助手 - 只读诊断版（未验证游戏）')
-    root.geometry('760x500')
+    root.geometry('820x650')
     root.minsize(600, 400)
     frame = ttk.Frame(root, padding=14)
     frame.pack(fill='both', expand=True)
@@ -182,10 +182,37 @@ def launch_readonly_gui():
     main_choice.pack(fill='x')
     choices = {}
     selected_title = ''
+    from account_roles import id_in_title, load_ids, resolve_roles, save_ids
+    prefs = Path.home() / 'YOYO_Logs' / 'account_ids.json'
+    known_ids, last_main = load_ids(prefs)
+    use_ids = tk.BooleanVar(value=bool(known_ids))
+    ttk.Checkbutton(frame, text='按游戏角色 ID 分配主副号', variable=use_ids).pack(anchor='w')
+    id_fields = []
+    window_labels = []
+    for index in range(2):
+        row = ttk.Frame(frame)
+        row.pack(fill='x')
+        label = ttk.Label(row, text='等待查找窗口', width=52)
+        label.pack(side='left')
+        entry = ttk.Combobox(row, values=known_ids, width=20)
+        entry.pack(side='left')
+        window_labels.append(label)
+        id_fields.append(entry)
+    row = ttk.Frame(frame)
+    row.pack(fill='x')
+    ttk.Label(row, text='主号 ID（另一 ID 作为副号）').pack(side='left')
+    main_id = ttk.Combobox(row, state='readonly', postcommand=lambda:
+                            main_id.configure(values=[e.get().strip() for e in id_fields if e.get().strip()]))
+    main_id.set(last_main)
+    main_id.pack(side='left')
+
 
     def refresh():
         nonlocal selected_title
         choices.clear()
+        for label, entry in zip(window_labels, id_fields):
+            label.configure(text='等待查找窗口')
+            entry.set('')
         main_choice.set('')
         main_choice.configure(values=())
         selected_title = title.get().strip()
@@ -207,6 +234,10 @@ def launch_readonly_gui():
                 label = f'{window.title}　位置 ({rect.x}, {rect.y})　窗口 {window.hwnd}'
                 choices[label] = window
             main_choice.configure(values=tuple(choices))
+            ordered = sorted(choices.items(), key=lambda item: item[0])
+            for (label, window), widget, entry in zip(ordered, window_labels, id_fields):
+                widget.configure(text=label)
+                entry.set(id_in_title(window.title, known_ids))
         except Exception as exc:
             choices.clear()
             messagebox.showwarning('窗口绑定', str(exc))
@@ -249,7 +280,10 @@ def launch_readonly_gui():
     def diagnostic_worker(mode, options):
         try:
             try:
+                assigned_ids = options.pop('assigned_ids', None)
                 result = execute(mode, **options)
+                if assigned_ids:
+                    result['用户指定角色ID'] = assigned_ids
             except Exception as exc:
                 result = {'mode': mode, 'status': 'paused',
                           'reason': 'unexpected_runtime_error',
@@ -281,12 +315,28 @@ def launch_readonly_gui():
 
     def observe():
         main = choices.get(main_choice.get())
-        if not main or len(choices) != 2 or selected_title != title.get().strip():
+        if len(choices) != 2 or selected_title != title.get().strip() or (not use_ids.get() and not main):
             messagebox.showinfo('水果剧团', '请查找双窗口并选择主号。')
             return
-        alt = next(w for w in choices.values() if w != main)
+        nonlocal known_ids
+        assigned_ids = None
+        if use_ids.get():
+            rows = [(entry.get().strip(), choices[label]) for entry, label in zip(id_fields, sorted(choices))]
+            try:
+                main, alt, alt_id = resolve_roles(rows, main_id.get())
+                new_ids = [value for value, window in rows]
+                save_ids(prefs, new_ids, main_id.get())
+                known_ids = new_ids
+                for entry in id_fields:
+                    entry.configure(values=known_ids)
+            except (ValueError, OSError) as exc:
+                messagebox.showwarning('角色 ID', str(exc))
+                return
+            assigned_ids = {'main': main_id.get(), 'alt': alt_id}
+        else:
+            alt = next(w for w in choices.values() if w != main)
         run('windows-dungeon-observe', title=selected_title, main_hwnd=main.hwnd,
-            alt_hwnd=alt.hwnd, dungeon='水果剧团', expected_windows=(main, alt))
+            alt_hwnd=alt.hwnd, dungeon='水果剧团', expected_windows=(main, alt), assigned_ids=assigned_ids)
 
     bar = ttk.Frame(frame)
     bar.pack(side='bottom', fill='x', pady=(10, 0))
