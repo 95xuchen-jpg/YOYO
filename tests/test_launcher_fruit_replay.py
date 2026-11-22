@@ -28,6 +28,7 @@ class FruitReplayLauncherTests(unittest.TestCase):
                     "room_code": "test-room-secret-must-not-appear",
                     "nested": {"password": "test-password-must-not-appear"},
                     "frame_bytes": b"raw-frame-bytes-must-not-appear",
+                    "payload": b"raw-binary-payload-must-not-appear",
                     "safe_status": "visible",
                 },
             }
@@ -36,6 +37,7 @@ class FruitReplayLauncherTests(unittest.TestCase):
         self.assertNotIn("test-room-secret-must-not-appear", saved)
         self.assertNotIn("test-password-must-not-appear", saved)
         self.assertNotIn("raw-frame-bytes-must-not-appear", saved)
+        self.assertNotIn("raw-binary-payload-must-not-appear", saved)
         self.assertIn("[REDACTED]", saved)
         self.assertIn("[REDACTED_BINARY]", saved)
         self.assertIn("visible", saved)
