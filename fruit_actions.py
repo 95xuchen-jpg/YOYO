@@ -126,6 +126,8 @@ def _observe(provider, windows, teaching, rules, stop, report, armed, seen):
     pending = {}
     previous = {}
     used = set()
+    from room_pin import configured_code, fill_room, field_empty
+    room_code = None if teaching else configured_code()
     opened_fruit_settings = False
     end = monotonic()+900
     while monotonic()<end and not stop.is_set():
@@ -169,7 +171,10 @@ def _observe(provider, windows, teaching, rules, stop, report, armed, seen):
                         rules[k]=(before,after)
                     report(i,'已观察到操作结果',state)
                     if state in ('PRIVATE_CREATE','PRIVATE_JOIN'):
-                        report(i,'请在游戏内手动输入房间密码并确认，助手会继续观察',state)
+                        sent = (room_code is not None and field_empty(old[2],state) and field_empty(frame,state)
+                                and fill_room(provider,window,rect,state,room_code,stop,click_client))
+                        hint = '已发送固定房间密码，请核对四位数字并点确定' if sent else '请手动填写固定房间密码并确认'
+                        report(i,hint,state)
                     del pending[i]
                 continue
             if key in used:
