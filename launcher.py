@@ -154,19 +154,47 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
     raise ValueError('unsupported mode')
 
 
+_SENSITIVE_LOG_KEYS = frozenset({
+    "password", "passwd", "passcode", "roomcode", "roompin", "pin", "pincode",
+    "secret", "token", "credential", "credentials", "screenshot", "screenshotbytes",
+    "frame", "rawframe", "framebytes", "framedata", "image", "imagebytes", "imagedata",
+})
+
+
+def _sanitize_log_value(value):
+    """Recursively remove credentials and binary captures before JSONL persistence."""
+    if isinstance(value, dict):
+        cleaned = {}
+        for key, item in value.items():
+            normalized = ''.join(ch for ch in str(key).casefold() if ch.isalnum())
+            sensitive = normalized in _SENSITIVE_LOG_KEYS or normalized.startswith((
+                "password", "passwd", "passcode", "roomcode", "roompin",
+                "credential", "secret", "token", "screenshot", "rawframe",
+                "framebytes", "framedata", "imagebytes", "imagedata",
+            ))
+            cleaned[key] = "[REDACTED]" if sensitive else _sanitize_log_value(item)
+        return cleaned
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_log_value(item) for item in value]
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        return "[REDACTED_BINARY]"
+    return value
+
+
 def write_session_log(result, *, log_dir=None):
-    """Persist a diagnostic JSONL event without recording passwords or screenshots."""
+    """Persist a diagnostic JSONL event after recursive secret/frame redaction."""
     root = Path(log_dir) if log_dir else Path.home() / 'YOYO_Logs'
     root.mkdir(parents=True, exist_ok=True)
     path = root / ('session_' + datetime.now(timezone.utc).strftime('%Y%m%d') + '.log')
-    event = {'timestamp_utc': datetime.now(timezone.utc).isoformat(),
-             'mode': result.get('mode'), 'status': result.get('status'),
-             'reason': result.get('reason'), 'input_enabled': result.get('input_enabled', False),
-             'game_state_verified': False, 'details': result}
+    event = _sanitize_log_value({
+        'timestamp_utc': datetime.now(timezone.utc).isoformat(),
+        'mode': result.get('mode'), 'status': result.get('status'),
+        'reason': result.get('reason'), 'input_enabled': result.get('input_enabled', False),
+        'game_state_verified': False, 'details': result,
+    })
     with path.open('a', encoding='utf-8') as stream:
         stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
     return path
-
 
 
 def launch_readonly_gui():

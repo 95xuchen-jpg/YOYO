@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from launcher import execute
+from launcher import execute, write_session_log
 
 
 class FruitReplayLauncherTests(unittest.TestCase):
@@ -16,6 +16,29 @@ class FruitReplayLauncherTests(unittest.TestCase):
         result = execute("fruit-replay", db="/definitely/missing/fruit.jsonl")
         self.assertEqual(result["reason"], "replay_file_unavailable")
         self.assertFalse(result["input_enabled"])
+
+
+    def test_session_log_redacts_nested_credentials_and_binary_frames(self):
+        with tempfile.TemporaryDirectory() as folder:
+            result = {
+                "mode": "fruit-replay",
+                "status": "paused",
+                "reason": "manual_review",
+                "details": {
+                    "room_code": "test-room-secret-must-not-appear",
+                    "nested": {"password": "test-password-must-not-appear"},
+                    "frame_bytes": b"raw-frame-bytes-must-not-appear",
+                    "safe_status": "visible",
+                },
+            }
+            path = write_session_log(result, log_dir=folder)
+            saved = path.read_text(encoding="utf-8")
+        self.assertNotIn("test-room-secret-must-not-appear", saved)
+        self.assertNotIn("test-password-must-not-appear", saved)
+        self.assertNotIn("raw-frame-bytes-must-not-appear", saved)
+        self.assertIn("[REDACTED]", saved)
+        self.assertIn("[REDACTED_BINARY]", saved)
+        self.assertIn("visible", saved)
 
     def test_invalid_evidence_fails_closed(self):
         with tempfile.TemporaryDirectory() as folder:
