@@ -34,6 +34,24 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(result["status"], "completed")
         self.assertFalse(result["input_enabled"])
 
+    def test_async_objectives_battle_and_reward_sequence(self):
+        result = self.replay([
+            record("ROOM_WAITING", same_room_verified=True),
+            record("FRUIT_LOADING", same_instance_verified=True),
+            record("OBJECTIVES", alt_state="FRUIT_BATTLE",
+                   same_instance_verified=True),
+            record("FRUIT_BATTLE", alt_state="OBJECTIVES",
+                   same_instance_verified=True),
+            record("REWARD", alt_state="FRUIT_BATTLE",
+                   same_instance_verified=True, main_reward_specific=True),
+            record("COMPLETE", alt_state="REWARD",
+                   same_instance_verified=True, alt_reward_specific=True),
+            record("COMPLETE", alt_state="COMPLETE",
+                   same_instance_verified=True),
+        ])
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(all(not item["input_enabled"] for item in result["decisions"]))
+
     def test_repeated_frames_do_not_stop_valid_capture(self):
         frames = [
             record("ROOM_WAITING", same_room_verified=True),
@@ -58,16 +76,18 @@ class ReplayTests(unittest.TestCase):
             record("ROOM_WAITING", same_room_verified=True),
             record("ROOM_WAITING", same_room_verified=False),
         ])
-        self.assertEqual(result["reason"], "entry_not_confirmed")
+        self.assertEqual(result["reason"], "same_room_not_confirmed")
 
-    def test_generic_reward_pauses(self):
+    def test_generic_reward_does_not_claim_completion(self):
         result = self.replay([
             record("ROOM_WAITING", same_room_verified=True),
             record("FRUIT_LOADING", same_instance_verified=True),
             record("FRUIT_BATTLE", same_instance_verified=True),
             record("REWARD", same_instance_verified=True),
         ])
+        self.assertEqual(result["status"], "waiting")
         self.assertEqual(result["reason"], "dungeon_specific_reward_not_confirmed")
+        self.assertFalse(result["input_enabled"])
 
     def test_invalid_or_missing_fields_pause(self):
         self.assertEqual(self.replay([{"main_state": "ROOM_WAITING"}])["reason"], "invalid_evidence")
@@ -77,7 +97,7 @@ class ReplayTests(unittest.TestCase):
     def test_two_accounts_out_of_sync_pause(self):
         result = self.replay([record("ROOM_WAITING", alt_state="ROOM_LIST",
                                      same_room_verified=True)])
-        self.assertEqual(result["reason"], "dual_account_state_mismatch")
+        self.assertEqual(result["status"], "paused")
 
 
 if __name__ == "__main__":
