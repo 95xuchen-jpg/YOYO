@@ -1,6 +1,8 @@
-"""Fail-closed evidence gate for Fruit Troupe dual-account progression.
+"""Fail-closed, advisory-only Fruit Troupe dual-account evidence gate.
 
-Advisory only: this module never sends input to the game.
+Repeated verified frames are expected during real video capture. They must not
+cause false stops, but missing verification, disagreement, or skipped phases do.
+No game input is sent by this module.
 """
 from dataclasses import dataclass
 
@@ -18,8 +20,6 @@ class FruitEvidence:
 
 
 class FruitSequenceGate:
-    """Require ordered, two-account evidence; a generic reward dialog is insufficient."""
-
     def __init__(self):
         self.phase = "ROOM"
         self.stopped = False
@@ -33,32 +33,48 @@ class FruitSequenceGate:
         states = (evidence.main_state, evidence.alt_state)
         if any(s in ("UNKNOWN", "ERROR", "") for s in states):
             return self._pause("unknown_screen")
+        if states[0] != states[1]:
+            return self._pause("dual_account_state_mismatch")
+
+        state = states[0]
         if self.phase == "ROOM":
-            if states == ("ROOM_WAITING", "ROOM_WAITING") and evidence.same_room_verified:
+            if state == "ROOM_WAITING" and evidence.same_room_verified:
                 self.phase = "READY"
                 return self._result("waiting", "REVIEW_START")
             return self._pause("same_room_not_confirmed")
         if self.phase == "READY":
-            if states == ("FRUIT_LOADING", "FRUIT_LOADING") and evidence.same_instance_verified:
+            if state == "ROOM_WAITING" and evidence.same_room_verified:
+                return self._result("waiting", "REVIEW_START")
+            if state == "FRUIT_LOADING" and evidence.same_instance_verified:
                 self.phase = "LOADING"
                 return self._result("waiting", "WAIT_FOR_BATTLE")
             return self._pause("entry_not_confirmed")
         if self.phase == "LOADING":
-            if states == ("FRUIT_BATTLE", "FRUIT_BATTLE") and evidence.same_instance_verified:
+            if state == "FRUIT_LOADING" and evidence.same_instance_verified:
+                return self._result("waiting", "WAIT_FOR_BATTLE")
+            if state == "FRUIT_BATTLE" and evidence.same_instance_verified:
                 self.phase = "BATTLE"
                 return self._result("waiting", "OBSERVE_BATTLE")
             return self._pause("battle_not_confirmed")
         if self.phase == "BATTLE":
-            if states == ("REWARD", "REWARD") and evidence.same_instance_verified and evidence.main_reward_specific and evidence.alt_reward_specific:
+            if state == "FRUIT_BATTLE" and evidence.same_instance_verified:
+                return self._result("waiting", "OBSERVE_BATTLE")
+            if (state == "REWARD" and evidence.same_instance_verified
+                    and evidence.main_reward_specific and evidence.alt_reward_specific):
                 self.phase = "REWARD"
                 return self._result("waiting", "REVIEW_REWARDS")
             return self._pause("dungeon_specific_reward_not_confirmed")
         if self.phase == "REWARD":
-            if states == ("COMPLETE", "COMPLETE") and evidence.same_instance_verified:
+            if (state == "REWARD" and evidence.same_instance_verified
+                    and evidence.main_reward_specific and evidence.alt_reward_specific):
+                return self._result("waiting", "REVIEW_REWARDS")
+            if state == "COMPLETE" and evidence.same_instance_verified:
                 self.phase = "COMPLETE"
                 return self._result("completed", "NO_OP")
             return self._pause("completion_not_confirmed")
-        return self._result("completed", "NO_OP")
+        if state == "COMPLETE" and evidence.same_instance_verified:
+            return self._result("completed", "NO_OP")
+        return self._pause("completion_regressed")
 
     def _result(self, status, action):
         return {"status": status, "phase": self.phase, "action": action,
