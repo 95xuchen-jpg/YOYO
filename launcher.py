@@ -12,6 +12,19 @@ from pathlib import Path
 
 
 def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None, expected_windows=None):
+    if mode == 'fruit-replay':
+        from fruit_replay import replay_jsonl
+        if not db:
+            return {'mode': mode, 'status': 'paused', 'reason': 'explicit_jsonl_required',
+                    'input_enabled': False, 'game_state_verified': False}
+        try:
+            report = replay_jsonl(db)
+        except (OSError, UnicodeError) as exc:
+            return {'mode': mode, 'status': 'paused', 'reason': 'replay_file_unavailable',
+                    'error_type': type(exc).__name__, 'input_enabled': False,
+                    'game_state_verified': False}
+        return {'mode': mode, **report, 'game_state_verified': False,
+                'input_enabled': False, 'replay_only': True}
     if mode == 'offline':
         from runner import simulate, simulate_window_preflight
         import tempfile
@@ -408,9 +421,9 @@ def main(argv=None):
         return 0
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
-                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo'])
+                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo', 'fruit-replay'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
-    parser.add_argument('--db', help='Persistent SQLite database for offline simulation only')
+    parser.add_argument('--db', help='SQLite database for offline simulation, or JSONL path for fruit-replay')
     parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
     parser.add_argument('--alt-hwnd', type=int, help='Explicit alt-account window handle for read-only observation')
     parser.add_argument('--dungeon', help='Dungeon for read-only observation; currently only 水果剧团')
