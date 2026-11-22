@@ -125,6 +125,8 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
                     'input_enabled': False, 'game_state_verified': False}
             if mode == 'windows-dungeon-observe':
                 labels = {'OBJECTIVES': '水果剧团任务面板', 'REWARD_PANEL': '副本领奖提示', 'UNKNOWN': '画面未识别'}
+                from fruit_actions import LABELS
+                labels.update(LABELS)
                 report['画面识别'] = {e.account_id: labels[e.screen] for e in evidence}
                 if any(e.screen != 'UNKNOWN' for e in evidence):
                     report['reason'] = 'visible_panel_observed'
@@ -146,7 +148,7 @@ def write_session_log(result, *, log_dir=None):
     path = root / ('session_' + datetime.now(timezone.utc).strftime('%Y%m%d') + '.log')
     event = {'timestamp_utc': datetime.now(timezone.utc).isoformat(),
              'mode': result.get('mode'), 'status': result.get('status'),
-             'reason': result.get('reason'), 'input_enabled': False,
+             'reason': result.get('reason'), 'input_enabled': result.get('input_enabled', False),
              'game_state_verified': False, 'details': result}
     with path.open('a', encoding='utf-8') as stream:
         stream.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')
@@ -164,12 +166,12 @@ def launch_readonly_gui():
         from dpi_awareness import enable_per_monitor_dpi
         enable_per_monitor_dpi()
     root = tk.Tk()
-    root.title('YOYO 双账号助手 - 只读诊断版（未验证游戏）')
+    root.title('YOYO 双账号助手 - 水果剧团 · 动作测试版')
     root.geometry('820x650')
     root.minsize(600, 400)
     frame = ttk.Frame(root, padding=14)
     frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text='只读诊断版：不会组队、点击、战斗或自动通关。', foreground='#9b341f').pack(anchor='w')
+    ttk.Label(frame, text='双窗观察和示教只读取画面。「执行已验证动作」会操作已绑定的游戏窗口。', foreground='#9b341f').pack(anchor='w')
     ttk.Label(frame, text='双击可运行，无需安装 Python。运行结果自动保存至 ~/YOYO_Logs。').pack(anchor='w', pady=(5, 10))
     from tkinter import messagebox
     selector = ttk.Frame(frame)
@@ -249,6 +251,8 @@ def launch_readonly_gui():
     output.configure(state='disabled')
 
     results = queue.Queue()
+    cancel = threading.Event()
+    taught = {}
     stopped = False
     running = False
 
@@ -256,6 +260,7 @@ def launch_readonly_gui():
         # Only offline diagnostics run in the worker; no game input exists.
         # Closing the GUI must not wait for the worker to finish.
         nonlocal stopped
+        cancel.set()
         stopped = True
         root.destroy()
 
@@ -269,6 +274,13 @@ def launch_readonly_gui():
             if running:
                 root.after(100, poll_result)
             return
+        if isinstance(result, str):
+            output.configure(state='normal')
+            output.insert('end', result + '\n')
+            output.see('end')
+            output.configure(state='disabled')
+            root.after(50, poll_result)
+            return
         running = False
         output.configure(state='normal')
         output.delete('1.0', 'end')
@@ -281,7 +293,32 @@ def launch_readonly_gui():
         try:
             try:
                 assigned_ids = options.pop('assigned_ids', None)
-                result = execute(mode, **options)
+                if mode in ('动作示教', '执行已验证动作'):
+                    from fruit_actions import session, LABELS
+                    from windows_provider import WindowsClientProvider
+                    training = mode == '动作示教'
+                    events = []
+                    def report(index, event, state):
+                        line = ('主号' if index == 0 else '副号') + ' · ' + LABELS.get(state,state) + ' · ' + event
+                        events.append(line)
+                        results.put(line)
+                    selected = options['expected_windows']
+                    identity_key = (selected, tuple(sorted((assigned_ids or {}).items())))
+                    rules = taught.setdefault(identity_key,{})
+                    candidate_rules = {} if training else rules
+                    try:
+                        if not training and not rules:
+                            raise ValueError('请先为当前角色完成动作示教')
+                        session(WindowsClientProvider(), selected, training, candidate_rules, cancel, report)
+                        result = {'mode': mode, 'status':'stopped'}
+                    except Exception as exc:
+                        result = {'mode':mode, 'status':'paused', 'reason':str(exc)}
+                    if training:
+                        rules.update(candidate_rules)
+                    result['已记录动作数'] = len(rules)
+                    result.update(events=events, input_enabled=not training, game_state_verified=False)
+                else:
+                    result = execute(mode, **options)
                 if assigned_ids:
                     result['用户指定角色ID'] = assigned_ids
             except Exception as exc:
@@ -308,12 +345,15 @@ def launch_readonly_gui():
         if running or stopped:
             return
         running = True
+        cancel.clear()
         button.configure(state='disabled')
         observe_button.configure(state='disabled')
         threading.Thread(target=diagnostic_worker, args=(mode, options), daemon=True).start()
         root.after(100, poll_result)
 
-    def observe():
+    def observe(mode='windows-dungeon-observe'):
+        if running:
+            return
         main = choices.get(main_choice.get())
         if len(choices) != 2 or selected_title != title.get().strip() or (not use_ids.get() and not main):
             messagebox.showinfo('水果剧团', '请查找双窗口并选择主号。')
@@ -335,9 +375,21 @@ def launch_readonly_gui():
             assigned_ids = {'main': main_id.get(), 'alt': alt_id}
         else:
             alt = next(w for w in choices.values() if w != main)
-        run('windows-dungeon-observe', title=selected_title, main_hwnd=main.hwnd,
+        if mode != 'windows-dungeon-observe':
+            msg = ('两个角色请先进入同一水果剧团房间，保持游戏窗口完整可见。'
+                   '示教时等待提示，再手动点开始挑战。战斗时仅在自动战斗关闭时手动开启；已经开启则停止示教。'
+                   if mode == '动作示教' else
+                   '请核对两个角色、房间及已示教的开关方向。助手将对每个匹配动作最多点击一次。')
+            if not messagebox.askokcancel(mode,msg):
+                return
+        run(mode, title=selected_title, main_hwnd=main.hwnd,
             alt_hwnd=alt.hwnd, dungeon='水果剧团', expected_windows=(main, alt), assigned_ids=assigned_ids)
 
+    controls = ttk.Frame(frame)
+    controls.pack(fill='x')
+    for caption in ('动作示教','执行已验证动作'):
+        ttk.Button(controls,text=caption,command=lambda m=caption: observe(m)).pack(side='left')
+    ttk.Button(controls,text='停止本轮',command=cancel.set).pack(side='left')
     bar = ttk.Frame(frame)
     bar.pack(side='bottom', fill='x', pady=(10, 0))
     output.pack(fill='both', expand=True)

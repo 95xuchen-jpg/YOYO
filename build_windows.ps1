@@ -74,10 +74,11 @@ $manifest = [ordered]@{
   build_utc = [DateTime]::UtcNow.ToString('o')
   test_scope = 'Windows offline simulation, fail-closed probe/gated-entrypoint and retired-PVP rejection smokes, gameplay flow rehearsal, and Python unit tests'
   game_tested = $false
-  automation_enabled = $false
-  result = 'diagnostic_only'
+  automation_enabled_by_default = $false
+  opt_in_taught_actions = $true
+  result = 'supervised_fruit_dungeon_trial'
 }
 $manifest | ConvertTo-Json -Depth 4 | Set-Content -Path (Join-Path $PSScriptRoot 'dist\build_manifest.json') -Encoding utf8
 Write-Output "Windows offline diagnostic smoke passed; SHA256=$hash"
-Write-Output 'Read-only diagnostic EXE only. Windows game capture and two-account validation NOT performed.'
+Write-Output 'Supervised actions require session teaching. Actual two-account game input has not been verified by CI.'
 exit 0
