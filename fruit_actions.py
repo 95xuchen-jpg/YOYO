@@ -36,15 +36,25 @@ def click_client(provider, window, rect, point):
     user.WindowFromPoint.restype = wintypes.HWND
     if user.WindowFromPoint(wintypes.POINT(rect.x+x,rect.y+y)) != window.hwnd:
         raise ValueError('目标按钮被遮挡')
-    send = user.SendMessageTimeoutW
-    send.argtypes = [wintypes.HWND,wintypes.UINT,wintypes.WPARAM,wintypes.LPARAM,
-                     wintypes.UINT,wintypes.UINT,ctypes.POINTER(ctypes.c_size_t)]
-    send.restype = wintypes.LPARAM
-    pos = (y << 16) | x
-    result = ctypes.c_size_t()
-    for message, flags in ((0x201,1),(0x202,0)):
-        if not send(window.hwnd,message,flags,pos,2,250,ctypes.byref(result)):
-            raise ValueError('游戏窗口未响应')
+    target = wintypes.POINT(rect.x+x,rect.y+y)
+    if not user.SetCursorPos(target.x,target.y):
+        raise ValueError('无法定位鼠标')
+    cursor = wintypes.POINT()
+    if (not user.GetCursorPos(ctypes.byref(cursor)) or (cursor.x,cursor.y)!=(target.x,target.y)
+            or user.WindowFromPoint(cursor)!=window.hwnd or provider.identity(window.hwnd)!=window
+            or provider.client_rect(window.hwnd)!=rect):
+        raise ValueError('目标窗口或鼠标已移动')
+    class MouseInput(ctypes.Structure):
+        _fields_ = [('dx',wintypes.LONG),('dy',wintypes.LONG),('data',wintypes.DWORD),
+                    ('flags',wintypes.DWORD),('time',wintypes.DWORD),('extra',ctypes.c_size_t)]
+    class Input(ctypes.Structure):
+        _fields_ = [('type',wintypes.DWORD),('mouse',MouseInput)]
+    events=(Input*2)()
+    events[0].mouse.flags=0x0002
+    events[1].mouse.flags=0x0004
+    user.SendInput.argtypes=[wintypes.UINT,ctypes.POINTER(Input),ctypes.c_int]
+    if user.SendInput(2,events,ctypes.sizeof(Input))!=2:
+        raise ValueError('系统未接受点击')
 
 
 def same_party(main, guest):

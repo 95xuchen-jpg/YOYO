@@ -36,7 +36,11 @@ class FruitActions(unittest.TestCase):
             window=provider.bind(canvas.winfo_id())
             rect=provider.client_rect(window.hwnd)
             click_client(provider,window,rect,(400,224))
-            root.update()
+            from time import monotonic, sleep
+            deadline=monotonic()+1
+            while not events and monotonic()<deadline:
+                root.update()
+                sleep(0.01)
             self.assertEqual(events,[(round(rect.width/2),round(rect.height/2))])
         finally:
             root.destroy()
