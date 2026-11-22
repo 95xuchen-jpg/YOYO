@@ -21,6 +21,9 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
                 result['journal'] = 'temporary (removed)'
         else:
             result = simulate(Path(db))
+        result['status'] = 'offline_rehearsal_only'
+        result['input_enabled'] = False
+        result['game_state_verified'] = False
         result['window_preflight'] = simulate_window_preflight()
         return result
     if mode == 'windows-probe':
