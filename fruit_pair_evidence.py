@@ -2,7 +2,7 @@
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 from io import BytesIO
-from time import monotonic
+from time import perf_counter
 from uuid import uuid4
 
 from PIL import Image, ImageChops, ImageStat
@@ -13,6 +13,8 @@ from fruit_sequence_gate import FruitEvidence, FruitSequenceGate
 from observation_bridge import CaptureEvidence, _valid_png
 from room_route import ink_agreement
 
+# Use the high-resolution performance counter for both capture and session times.
+# Adjacent grabs can share a tick of the lower-resolution Windows 3.11 monotonic clock.
 # Upper bound from before the first grab through evaluation of the second.
 MAX_AGE = 4.0
 _HOST = dict(TEMPLATES)["LEADER_READY"]
@@ -99,7 +101,7 @@ def _context(provider, bindings):
     return tuple(contexts)
 
 
-def observe_pair(provider, bindings, *, clock=monotonic, expected_context=None, recent_pixels=None):
+def observe_pair(provider, bindings, *, clock=perf_counter, expected_context=None, recent_pixels=None):
     """Use only the selected live provider. No caller-supplied states or identity claims."""
     if (len(bindings) != 2 or tuple(b[0] for b in bindings) != ("main", "alt")
             or any(type(v) is not int or v <= 0 for _, *ids in bindings for v in ids)
@@ -183,7 +185,7 @@ def observe_pair(provider, bindings, *, clock=monotonic, expected_context=None, 
         return abstain("capture_unavailable")
 
 
-def watch_pair(provider, bindings, stop, on_change, *, clock=monotonic, duration=900):
+def watch_pair(provider, bindings, stop, on_change, *, clock=perf_counter, duration=900):
     """Follow one bound pair. Output only observed UI milestones, never authorize input."""
     accounts = ("main", "alt")
     # Settlement-to-port is a short transition. Expire associations across gaps.
