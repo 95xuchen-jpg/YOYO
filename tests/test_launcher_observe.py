@@ -104,6 +104,17 @@ class ObserveEntrypointTests(unittest.TestCase):
         self.assertFalse(any(x['two_frames_present'] for x in result['captures']))
         self.assertFalse(result['input_enabled'])
 
+    def test_watch_mode_rejects_window_drift_and_never_clicks(self):
+        p = self.provider()
+        p.visible_dpi.side_effect = [96, 96, 144, 96]
+        events = []
+        result = execute('windows-dungeon-watch', title='Game', provider=p,
+                         main_hwnd=101, alt_hwnd=202, dungeon='水果剧团', on_change=events.append)
+        self.assertEqual(result['reason'], 'capture_context_changed')
+        self.assertFalse(result['input_enabled'])
+        self.assertEqual(events, [])
+        p.screenshot_pair.assert_not_called()
+
     def test_fruit_dungeon_rejects_mismatched_account_window(self):
         p = self.provider()
         result = execute('windows-dungeon-observe', title='Game', provider=p,

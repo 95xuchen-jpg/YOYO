@@ -8,6 +8,7 @@ from uuid import uuid4
 from PIL import Image, ImageChops, ImageStat
 
 from fruit_screen import TEMPLATES, _matches, classify
+from fruit_receipt import outcome_panel
 from fruit_sequence_gate import FruitEvidence, FruitSequenceGate
 from observation_bridge import CaptureEvidence, _valid_png
 from room_route import ink_agreement
@@ -36,7 +37,10 @@ class PairResult:
     def sequence(self):
         # The recording has no validated unique room, instance or reward key.
         # Binding labels, same-name rows and JSONL replay flags cannot supply one.
-        states = tuple("ROOM_WAITING" if e.screen in _ROOM else e.screen for e in self.captures)
+        phases = {"HOST_MEMBER_ROW": "ROOM_WAITING", "GUEST_MEMBER_ROW": "ROOM_WAITING",
+                  "FRUIT_SETTLEMENT": "REWARD_PANEL", "FRUIT_SETTLEMENT_WITH_RECEIPT": "REWARD_PANEL",
+                  "FRUIT_RECEIPT_IN_PORT": "REWARD"}
+        states = tuple(phases.get(e.screen, e.screen) for e in self.captures)
         stable = tuple(e.screen != "UNKNOWN" and e.two_frames_present for e in self.captures)
         return FruitSequenceGate().advance(FruitEvidence(*states, *stable))
 
@@ -95,7 +99,7 @@ def _context(provider, bindings):
     return tuple(contexts)
 
 
-def observe_pair(provider, bindings, *, clock=monotonic):
+def observe_pair(provider, bindings, *, clock=monotonic, expected_context=None, recent_pixels=None):
     """Use only the selected live provider. No caller-supplied states or identity claims."""
     if (len(bindings) != 2 or tuple(b[0] for b in bindings) != ("main", "alt")
             or any(type(v) is not int or v <= 0 for _, *ids in bindings for v in ids)
@@ -109,6 +113,8 @@ def observe_pair(provider, bindings, *, clock=monotonic):
 
     try:
         initial = _context(provider, bindings)
+        if expected_context is not None and initial != expected_context:
+            return abstain("capture_context_changed")
         rects = tuple(c[1] for c in initial)
         rounds = []
         for _ in range(2):
@@ -129,16 +135,26 @@ def observe_pair(provider, bindings, *, clock=monotonic):
         seen = set()
         for data in rounds:
             row = []
+            labels = []
             for d in data:
                 with Image.open(BytesIO(d)) as image:
                     rgb = image.convert("RGB")
                     digest = (rgb.size, sha256(rgb.tobytes()).digest())
-                    if digest in seen:
+                    if digest in seen or (recent_pixels is not None and digest in recent_pixels):
                         return abstain("static_or_replayed_capture")
                     seen.add(digest)
-                    row.append(_room_marker(rgb))
+                    member = _room_marker(rgb)
+                    row.append(member)
+                    if member:
+                        label = member[0]
+                    else:
+                        label = classify(d)
+                        if abs(rgb.width / rgb.height - 16 / 9) <= 0.05:
+                            gray = rgb.resize((800, 448), Image.Resampling.LANCZOS).convert("L")
+                            label = outcome_panel(gray, label)
+                    labels.append(label)
             markers.append(row)
-            screens.append(tuple(m[0] if m else classify(d) for m, d in zip(row, data)))
+            screens.append(tuple(labels))
         if _context(provider, bindings) != initial:
             return abstain("capture_context_changed")
         now = clock()
@@ -155,6 +171,8 @@ def observe_pair(provider, bindings, *, clock=monotonic):
             reason = "complementary_room_views_missing"
         elif paired_rows and not agreed:
             reason = "member_row_disagreement"
+        if recent_pixels is not None:
+            recent_pixels.update(seen)
         return PairResult(captures, tuple(sources), agreed, reason)
     except ValueError as exc:
         reason = str(exc)
@@ -163,3 +181,68 @@ def observe_pair(provider, bindings, *, clock=monotonic):
         return abstain("capture_unavailable")
     except Exception:
         return abstain("capture_unavailable")
+
+
+def watch_pair(provider, bindings, stop, on_change, *, clock=monotonic, duration=900):
+    """Follow one bound pair. Output only observed UI milestones, never authorize input."""
+    accounts = ("main", "alt")
+    # Settlement-to-port is a short transition. Expire associations across gaps.
+    settlement = [None, None]
+    receipt = [False, False]
+    previous = None
+    recent_pixels = set()  # Session-only pixel digests, excluded from reports.
+    samples = 0
+    since = clock()
+    last_timestamp = since
+    outcome = dict(status="paused", input_enabled=False, game_state_verified=False,
+                   same_room="UNKNOWN", same_instance="UNKNOWN")
+    initial = _context(provider, bindings)
+    reason = "observation_timeout"
+    while clock() - since < duration:
+        if stop.is_set():
+            reason = "observation_stopped"
+            break
+        pair = observe_pair(provider, bindings, clock=clock, expected_context=initial, recent_pixels=recent_pixels)
+        if stop.is_set():
+            reason = "observation_stopped"
+            break
+        if not all(c.identity_ok and c.geometry_ok and c.two_frames_present for c in pair.captures):
+            reason = pair.reason
+            break
+        first, last = pair.sources
+        if first.started < last_timestamp or last.ended <= last_timestamp:
+            reason = "capture_time_invalid"
+            break
+        last_timestamp = last.ended
+        samples += 1
+        states = tuple(c.screen for c in pair.captures)
+        for i, state in enumerate(states):
+            if settlement[i] is not None and last.ended - settlement[i] > 15:
+                reason = "settlement_window_expired"
+                break
+            if state == "FRUIT_SETTLEMENT_WITH_RECEIPT":
+                reason = "receipt_already_visible_at_settlement"
+                break
+            if state == "FRUIT_SETTLEMENT" and settlement[i] is None:
+                settlement[i] = last.ended
+            if state == "FRUIT_RECEIPT_IN_PORT" and settlement[i] is not None:
+                receipt[i] = True
+            if settlement[i] is not None and state not in (
+                    "FRUIT_SETTLEMENT", "FRUIT_RECEIPT_IN_PORT", "UNKNOWN", "FRUIT_LOADING"):
+                reason = "scene_changed_after_settlement"
+                break
+        else:
+            current = (states, tuple(receipt), pair.member_text_shape_agrees)
+            if current != previous:
+                event = dict(screens=dict(zip(accounts, states)), receipt_after_settlement=dict(zip(accounts, receipt)),
+                             elapsed_seconds=round(last.ended - since, 2), **pair.summary())
+                on_change(event)
+                previous = current
+            if all(receipt) and states == ("FRUIT_RECEIPT_IN_PORT", "FRUIT_RECEIPT_IN_PORT"):
+                outcome["status"] = "observed"
+                reason = "both_port_receipts_observed_after_settlement"
+                break
+            stop.wait(0.1)
+            continue
+        break
+    return dict(outcome, reason=reason, samples=samples, receipt_after_settlement=dict(zip(accounts, receipt)))

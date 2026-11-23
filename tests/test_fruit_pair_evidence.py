@@ -10,10 +10,11 @@ import unittest
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import Mock
+from threading import Event
 
 from PIL import Image, ImageDraw
 from core import Rect
-from fruit_pair_evidence import observe_pair
+from fruit_pair_evidence import observe_pair, watch_pair
 from fruit_screen import TEMPLATES
 from launcher import write_session_log
 from windows_provider import WindowIdentity, WindowsClientProvider
@@ -107,6 +108,12 @@ class FruitPairTest(unittest.TestCase):
         with Image.open(BytesIO(rounds[0][1])) as first:
             rounds[1] = rounds[1][0], png(first, compress_level=1)
         self.assertEqual(self.check(Provider(rounds)).reason, "static_or_replayed_capture")
+
+    def test_watch_refuses_replay_across_batches(self):
+        rounds = rooms()
+        result = watch_pair(Provider(rounds + rounds), BINDINGS, Event(), lambda event: None)
+        self.assertEqual(result["reason"], "static_or_replayed_capture")
+        self.assertEqual(result["samples"], 1)
 
     def test_stale_pair(self):
         times = iter((1.0, 1.1, 2.0, 2.1, 10.0))
@@ -205,10 +212,12 @@ class RecordingTest(unittest.TestCase):
             ((28.75, 28.8), ("HOST_MEMBER_ROW", "GUEST_MEMBER_ROW"), True),
             ((28.8, 29.6), ("UNKNOWN", "UNKNOWN"), False),
             ((29.2, 29.6), ("FRUIT_LOADING", "FRUIT_LOADING"), False),
-            ((189.4, 189.65), ("REWARD_PANEL", "REWARD_PANEL"), False),
-            ((190.1, 190.6), ("UNKNOWN", "REWARD_PANEL"), False),
-            ((191, 193), ("UNKNOWN", "UNKNOWN"), False),
+            ((189.4, 189.65), ("FRUIT_SETTLEMENT", "FRUIT_SETTLEMENT"), False),
+            ((190.1, 190.6), ("UNKNOWN", "FRUIT_SETTLEMENT"), False),
+            ((191, 191.4), ("FRUIT_RECEIPT_IN_PORT", "UNKNOWN"), False),
+            ((191.9, 192.05), ("FRUIT_RECEIPT_IN_PORT", "FRUIT_RECEIPT_IN_PORT"), False),
         ]
+        outcome_rounds = []
         for times, expected, agreement in cases:
             with self.subTest(times=times):
                 rounds = []
@@ -217,8 +226,19 @@ class RecordingTest(unittest.TestCase):
                         str(path), "-frames:v", "1", "-f", "image2pipe", "-c:v", "png", "-"])
                     with Image.open(BytesIO(data)) as im:
                         rounds.append(tuple(png(im.crop((x, 369, x+1228, 1059))) for x in (55, 1286)))
+                if times[0] >= 189:
+                    outcome_rounds.extend(rounds)
                 result = observe_pair(Provider(rounds, (1228, 690)), BINDINGS)
                 self.assertEqual(tuple(c.screen for c in result.captures), expected)
                 self.assertEqual(result.member_text_shape_agrees, agreement)
                 self.assertEqual(result.sequence()["status"], "paused")
                 self.assertFalse(result.sequence()["input_enabled"])
+
+        events = []
+        result = watch_pair(Provider(outcome_rounds, (1228, 690)), BINDINGS, Event(), events.append)
+        self.assertEqual(result["reason"], "both_port_receipts_observed_after_settlement")
+        self.assertEqual(result["samples"], 4)
+        self.assertEqual(result["same_instance"], "UNKNOWN")
+        self.assertFalse(result["input_enabled"])
+        self.assertEqual([list(e["receipt_after_settlement"].values()) for e in events],
+                         [[False, False], [False, False], [True, False], [True, True]])
