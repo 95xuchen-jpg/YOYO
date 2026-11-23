@@ -22,6 +22,18 @@ class ObserveEntrypointTests(unittest.TestCase):
             Image.new('RGB', (width, height)).save(stream, format='PNG')
             return stream.getvalue()
 
+        p.visible_dpi.return_value = 96
+        counter = 0
+        def paired(rects):
+            nonlocal counter
+            counter += 1
+            images = []
+            for i, r in enumerate(rects):
+                stream = BytesIO()
+                Image.new('RGB', (r.width, r.height), (counter, i, 0)).save(stream, format='PNG')
+                images.append(stream.getvalue())
+            return tuple(images)
+        p.screenshot_pair.side_effect = paired
         p.screenshot.side_effect = png_for
         return p
 
@@ -75,22 +87,33 @@ class ObserveEntrypointTests(unittest.TestCase):
         result = execute('windows-dungeon-observe', title='Game', provider=p,
                          main_hwnd=202, alt_hwnd=101, dungeon='水果剧团')
         self.assertEqual(result['status'], 'paused')
-        self.assertEqual(result['reason'], 'two_frame_confirmation_missing')
+        self.assertEqual(result['reason'], 'unknown_or_transitioning_panel')
         self.assertEqual(result['dungeon'], '水果剧团')
         self.assertEqual([x['hwnd'] for x in result['captures']], [202, 101])
-        self.assertEqual(p.screenshot.call_count, 4)
+        self.assertEqual(p.screenshot_pair.call_count, 2)
         self.assertTrue(all(x['two_frames_present'] for x in result['captures']))
         self.assertFalse(result['input_enabled'])
         self.assertFalse(result['game_state_verified'])
 
     def test_fruit_dungeon_bad_frame_pauses(self):
         p = self.provider()
-        p.screenshot.side_effect = lambda hwnd: b'bad-frame'
+        p.screenshot_pair.side_effect = lambda rects: (b'bad-frame', b'bad-frame')
         result = execute('windows-dungeon-observe', title='Game', provider=p,
                          main_hwnd=101, alt_hwnd=202, dungeon='水果剧团')
         self.assertEqual(result['status'], 'paused')
         self.assertFalse(any(x['two_frames_present'] for x in result['captures']))
         self.assertFalse(result['input_enabled'])
+
+    def test_watch_mode_rejects_window_drift_and_never_clicks(self):
+        p = self.provider()
+        p.visible_dpi.side_effect = [96, 96, 144, 96]
+        events = []
+        result = execute('windows-dungeon-watch', title='Game', provider=p,
+                         main_hwnd=101, alt_hwnd=202, dungeon='水果剧团', on_change=events.append)
+        self.assertEqual(result['reason'], 'capture_context_changed')
+        self.assertFalse(result['input_enabled'])
+        self.assertEqual(events, [])
+        p.screenshot_pair.assert_not_called()
 
     def test_fruit_dungeon_rejects_mismatched_account_window(self):
         p = self.provider()

@@ -11,7 +11,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None, expected_windows=None):
+def fruit_label(screen):
+    from fruit_actions import LABELS
+    labels = {'OBJECTIVES': '水果剧团任务面板', 'REWARD_PANEL': '副本领奖提示',
+              'UNKNOWN': '画面未识别', 'HOST_MEMBER_ROW': '房主端第二成员栏',
+              'GUEST_MEMBER_ROW': '队员端第二成员栏', 'FRUIT_SETTLEMENT': '水果剧团战绩结算',
+              'FRUIT_SETTLEMENT_WITH_RECEIPT': '结算时已显示礼盒消息',
+              'FRUIT_RECEIPT_IN_PORT': '曼谷港 · 系统获得水果剧团礼盒'}
+    return labels.get(screen) or LABELS.get(screen, screen)
+
+
+def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwnd=None, dungeon=None, expected_windows=None,
+            stop=None, on_change=None, log_dir=None):
     if mode == 'fruit-replay':
         from fruit_replay import replay_jsonl
         if not db:
@@ -86,8 +97,8 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
                     'input_enabled': False, 'game_state_verified': False}
         return {'mode': mode, 'status': 'offline_rehearsal_only', 'preflight': after,
                 'rehearsal': rehearsal, 'input_enabled': False, 'game_state_verified': False}
-    if mode in ('windows-observe', 'windows-dungeon-observe'):
-        if mode == 'windows-dungeon-observe' and dungeon != '水果剧团':
+    if mode in ('windows-observe', 'windows-dungeon-observe', 'windows-dungeon-watch'):
+        if mode != 'windows-observe' and dungeon != '水果剧团':
             return {'mode': mode, 'status': 'paused', 'reason': 'explicit_fruit_dungeon_required',
                     'input_enabled': False, 'game_state_verified': False}
         if (type(main_hwnd) is not int or type(alt_hwnd) is not int or
@@ -121,13 +132,23 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             for w in windows:
                 if provider.bind(w.hwnd) != w:
                     raise ValueError('window_binding_changed')
-            from fruit_screen import classify
-            evidence = capture_pair(provider, bindings, classifier=classify if dungeon == '水果剧团' else None)
+            if mode == 'windows-dungeon-watch':
+                from threading import Event
+                from fruit_pair_evidence import watch_pair
+                def save_change(event):
+                    write_session_log(dict(mode=mode, status='observing', input_enabled=False,
+                                           game_state_verified=False, **event), log_dir=log_dir)
+                result = watch_pair(provider, bindings, stop if stop is not None else Event(),
+                                    on_change if on_change is not None else save_change)
+                return dict(result, mode=mode, dungeon=dungeon)
             if mode == 'windows-dungeon-observe':
-                # Panel labels alone do not establish account or instance identity.
+                from fruit_pair_evidence import observe_pair
+                pair = observe_pair(provider, bindings)
+                evidence = pair.captures
                 observations = safe_dungeon_observations(evidence, dungeon=dungeon)
                 decision = DungeonFlow('main', 'alt', dungeon=dungeon, leader='main').advance(observations)
             else:
+                evidence = capture_pair(provider, bindings)
                 observations = safe_coop_observations(evidence)
                 decision = CoopFlow('main', 'alt', leader='main').advance(observations)
             report = {'mode': mode, 'status': 'paused', 'reason': decision.reason,
@@ -137,12 +158,9 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
                                       two_frames_present=e.two_frames_present, screen=e.screen) for e in evidence],
                     'input_enabled': False, 'game_state_verified': False}
             if mode == 'windows-dungeon-observe':
-                labels = {'OBJECTIVES': '水果剧团任务面板', 'REWARD_PANEL': '副本领奖提示', 'UNKNOWN': '画面未识别'}
-                from fruit_actions import LABELS
-                labels.update(LABELS)
-                report['画面识别'] = {e.account_id: labels[e.screen] for e in evidence}
-                if any(e.screen != 'UNKNOWN' for e in evidence):
-                    report['reason'] = 'visible_panel_observed'
+                report['画面识别'] = {e.account_id: fruit_label(e.screen) for e in evidence}
+                report['paired_evidence'] = pair.summary()
+                report['reason'] = pair.reason
             return report
         except Exception as exc:
             return {'mode': mode, 'status': 'paused', 'reason': 'observation_preflight_failed',
@@ -358,6 +376,13 @@ def launch_readonly_gui():
                         rules.update(candidate_rules)
                     result['已记录动作数'] = len(rules)
                     result.update(events=events, input_enabled=not training, game_state_verified=False)
+                elif mode == 'windows-dungeon-watch':
+                    def on_change(event):
+                        write_session_log(dict(mode=mode, status='observing', input_enabled=False,
+                                               game_state_verified=False, **event))
+                        results.put('主号 · ' + fruit_label(event['screens']['main'])
+                                    + '　副号 · ' + fruit_label(event['screens']['alt']))
+                    result = execute(mode, stop=cancel, on_change=on_change, **options)
                 else:
                     result = execute(mode, **options)
                 if assigned_ids:
@@ -416,7 +441,7 @@ def launch_readonly_gui():
             assigned_ids = {'main': main_id.get(), 'alt': alt_id}
         else:
             alt = next(w for w in choices.values() if w != main)
-        if mode != 'windows-dungeon-observe':
+        if mode in ('动作示教', '执行已验证动作'):
             msg = ('可从两号的「日常」面板开始。主号创建私人房间，副号从列表选择同一房主。保持双窗可见。'
                    '示教时按提示点击。房间密码及确认由你在游戏内完成。战斗时仅在自动战斗关闭时手动开启；已经开启则停止示教。'
                    if mode == '动作示教' else
@@ -430,6 +455,7 @@ def launch_readonly_gui():
     controls.pack(fill='x')
     for caption in ('动作示教','执行已验证动作'):
         ttk.Button(controls,text=caption,command=lambda m=caption: observe(m)).pack(side='left')
+    ttk.Button(controls, text='连续观察至双号领奖', command=lambda: observe('windows-dungeon-watch')).pack(side='left')
     ttk.Button(controls,text='停止本轮',command=cancel.set).pack(side='left')
     bar = ttk.Frame(frame)
     bar.pack(side='bottom', fill='x', pady=(10, 0))
@@ -449,7 +475,7 @@ def main(argv=None):
         return 0
     parser = argparse.ArgumentParser(description='Safe dual-account diagnostics; no game input')
     parser.add_argument('--mode', required=True,
-                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'gameplay-demo', 'fruit-replay'])
+                        choices=['offline', 'windows-probe', 'windows-gated-offline', 'windows-observe', 'windows-dungeon-observe', 'windows-dungeon-watch', 'gameplay-demo', 'fruit-replay'])
     parser.add_argument('--title', help='Required for Windows probe: exact title substring')
     parser.add_argument('--db', help='SQLite database for offline simulation, or JSONL path for fruit-replay')
     parser.add_argument('--main-hwnd', type=int, help='Explicit main-account window handle for read-only observation')
@@ -461,7 +487,8 @@ def main(argv=None):
         parser.error('--db is not supported in windows-probe mode')
     try:
         result = execute(args.mode, db=args.db, title=args.title,
-                         main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd, dungeon=args.dungeon)
+                         main_hwnd=args.main_hwnd, alt_hwnd=args.alt_hwnd, dungeon=args.dungeon,
+                         log_dir=args.log_dir)
     except Exception as exc:
         # Unexpected runtime failures must still leave a durable, non-sensitive
         # diagnostic record instead of silently terminating the frozen EXE.
