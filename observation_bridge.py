@@ -94,8 +94,16 @@ def safe_coop_observations(evidence, server_id=""):
 
 
 def safe_dungeon_observations(evidence, dungeon, server_id=""):
+    fruit_panels = {"HOST_MEMBER_ROW": "ROOM", "GUEST_MEMBER_ROW": "ROOM",
+                    "ROOM_WAITING": "ROOM", "LEADER_READY": "ROOM", "FRUIT_LOADING": "LOADING",
+                    "OBJECTIVES": "MAP", "FRUIT_BATTLE": "BATTLE", "REWARD_PANEL": "REWARD"}
+    def panel(e):
+        if dungeon == "水果剧团" and e.identity_ok and e.geometry_ok and e.two_frames_present:
+            return fruit_panels.get(e.screen, "UNKNOWN")
+        return "UNKNOWN"
+
     return tuple(DungeonObservation(account_id=e.account_id, window_id=e.hwnd,
                                     server_id=server_id, dungeon=dungeon,
-                                    screen="UNKNOWN", stable=False,
+                                    screen=panel(e), stable=False,
                                     identity_ok=False,
                                     geometry_ok=e.geometry_ok) for e in evidence)

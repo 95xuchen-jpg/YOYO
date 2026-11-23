@@ -106,3 +106,61 @@ class WindowsClientProvider:
             return self._capture(bounds)
         except Exception:
             return None
+
+    def visible_dpi(self, hwnd, rect):
+        """Return this client's DPI only for an unobstructed, on-monitor rectangle."""
+        wt, user = self.wintypes, self.user32
+        user.GetThreadDpiAwarenessContext.restype = ctypes.c_void_p
+        user.GetAwarenessFromDpiAwarenessContext.argtypes = [ctypes.c_void_p]
+        if user.GetAwarenessFromDpiAwarenessContext(user.GetThreadDpiAwarenessContext()) != 2:
+            return None
+        user.IsIconic.argtypes = [wt.HWND]
+        user.GetDpiForWindow.argtypes = [wt.HWND]
+        user.GetWindow.argtypes = [wt.HWND, wt.UINT]
+        user.GetWindow.restype = wt.HWND
+        user.GetWindowRect.argtypes = [wt.HWND, ctypes.POINTER(wt.RECT)]
+        user.MonitorFromPoint.argtypes = [wt.POINT, wt.DWORD]
+        user.MonitorFromPoint.restype = wt.HANDLE
+        right, bottom = rect.x + rect.width, rect.y + rect.height
+        first = user.MonitorFromPoint(wt.POINT(rect.x, rect.y), 0)
+        last = user.MonitorFromPoint(wt.POINT(right - 1, bottom - 1), 0)
+        if not first or first != last or user.IsIconic(hwnd):
+            return None
+        seen = {hwnd}
+        above = user.GetWindow(hwnd, 3)  # GW_HWNDPREV, towards the top of Z order.
+        while above:
+            if above in seen:
+                return None
+            seen.add(above)
+            if user.IsWindowVisible(above) and not user.IsIconic(above):
+                box = wt.RECT()
+                if not user.GetWindowRect(above, ctypes.byref(box)):
+                    return None
+                if box.left < right and box.right > rect.x and box.top < bottom and box.bottom > rect.y:
+                    return None
+            above = user.GetWindow(above, 3)
+        return user.GetDpiForWindow(hwnd) or None
+
+    def screenshot_pair(self, rects):
+        """Split one watchdog capture so both observations share a desktop instant."""
+        from io import BytesIO
+        from PIL import Image
+        left = min(r.x for r in rects)
+        top = min(r.y for r in rects)
+        width = max(r.x + r.width for r in rects) - left
+        height = max(r.y + r.height for r in rects) - top
+        bounds = Rect(left, top, width, height)
+        data = (self._capture or self._watchdog.capture)(bounds)
+        if not data:
+            return None
+        with Image.open(BytesIO(data)) as desktop:
+            if desktop.format != 'PNG' or desktop.size != (width, height):
+                return None
+            images = []
+            for r in rects:
+                x, y = r.x - left, r.y - top
+                crop = desktop.crop((x, y, x + r.width, y + r.height)).convert('RGB')
+                output = BytesIO()
+                crop.save(output, format='PNG')
+                images.append(output.getvalue())
+        return tuple(images)

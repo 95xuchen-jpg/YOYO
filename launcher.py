@@ -121,13 +121,14 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             for w in windows:
                 if provider.bind(w.hwnd) != w:
                     raise ValueError('window_binding_changed')
-            from fruit_screen import classify
-            evidence = capture_pair(provider, bindings, classifier=classify if dungeon == '水果剧团' else None)
             if mode == 'windows-dungeon-observe':
-                # Panel labels alone do not establish account or instance identity.
+                from fruit_pair_evidence import observe_pair
+                pair = observe_pair(provider, bindings)
+                evidence = pair.captures
                 observations = safe_dungeon_observations(evidence, dungeon=dungeon)
                 decision = DungeonFlow('main', 'alt', dungeon=dungeon, leader='main').advance(observations)
             else:
+                evidence = capture_pair(provider, bindings)
                 observations = safe_coop_observations(evidence)
                 decision = CoopFlow('main', 'alt', leader='main').advance(observations)
             report = {'mode': mode, 'status': 'paused', 'reason': decision.reason,
@@ -139,10 +140,11 @@ def execute(mode, *, db=None, title=None, provider=None, main_hwnd=None, alt_hwn
             if mode == 'windows-dungeon-observe':
                 labels = {'OBJECTIVES': '水果剧团任务面板', 'REWARD_PANEL': '副本领奖提示', 'UNKNOWN': '画面未识别'}
                 from fruit_actions import LABELS
-                labels.update(LABELS)
+                labels.update(LABELS, HOST_MEMBER_ROW='房主端第二成员栏',
+                              GUEST_MEMBER_ROW='队员端第二成员栏')
                 report['画面识别'] = {e.account_id: labels[e.screen] for e in evidence}
-                if any(e.screen != 'UNKNOWN' for e in evidence):
-                    report['reason'] = 'visible_panel_observed'
+                report['paired_evidence'] = pair.summary()
+                report['reason'] = pair.reason
             return report
         except Exception as exc:
             return {'mode': mode, 'status': 'paused', 'reason': 'observation_preflight_failed',
