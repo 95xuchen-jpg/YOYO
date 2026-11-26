@@ -27,3 +27,21 @@ jobs:
             dist/PLN_ReadOnly_Diagnostics.exe
             dist/build_manifest.json
           if-no-files-found: error
+  duo:
+    name: Build Windows dual dungeon assistant
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - shell: pwsh
+        run: ./build_duo.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YOYO_DuoDungeon_Win64
+          path: |
+            dist/YOYO_DuoDungeon.exe
+            dist/使用说明.md
+          if-no-files-found: error
