@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'">
+<title>双人副本录像分卷</title>
+<style>
+body{font:16px/1.65 "Microsoft YaHei UI",system-ui,sans-serif;color:#172f34;background:#f1f5f2;margin:0}
+main{max-width:660px;margin:8vh auto;padding:32px;background:#fff;border:1px solid #cad9d3;border-radius:12px}
+h1{font-size:26px;line-height:1.25;margin:0 0 16px}button{font:inherit;color:white;background:#215b50;border:0;border-radius:6px;padding:9px 16px;cursor:pointer}
+button:disabled{opacity:.55}progress{accent-color:#215b50;width:100%}#status{min-height:1.6em}ul{padding-left:22px}
+</style>
+<main>
+<h1>双人副本录像分卷</h1>
+<p>用 Windows 11 的 Edge 或 Chrome 打开。选择存放原始 MP4 的文件夹，工具会按副本名挑出六段录像，优先处理「勇闯火焰山」。可只放其中一段。</p>
+<p>每卷最多 200 MiB。工具在原片旁新建 <b>YOYO-录像分卷</b> 文件夹，只写入分卷。若原片在 Google Drive 同步目录，等待分卷同步即可；否则将生成的整个文件夹上传至「双人日常组队副本实拍」。</p>
+<button id="choose">选择录像文件夹并分卷</button>
+<p id="status" role="status"></p>
+<progress id="progress" value="0" max="1"></progress>
+<ul id="done"></ul>
+</main>
+<script>
+'use strict';
+const titles = ['勇闯火焰山','拯救蓝星人','幽灵之地','黑暗藏身地','亚历山大帝','侏罗纪牧场'];
+const partSize = 200 * 1024 * 1024;
+async function sameBytes(left, right) {
+  if (left.size !== right.size) return false;
+  const block = 4 * 1024 * 1024;
+  for (let offset = 0; offset < left.size; offset += block) {
+    const [a,b] = await Promise.all([left,right].map(blob => blob.slice(offset,offset+block).arrayBuffer()));
+    const view = new Uint8Array(b);
+    if (!new Uint8Array(a).every((value,index) => value === view[index])) return false;
+  }
+  return true;
+}
+async function findPart(directory,name) {
+  try { return await directory.getFileHandle(name); }
+  catch (error) { if (error.name === 'NotFoundError') return null; throw error; }
+}
+async function splitMovie(movie,directory,limit,onPart) {
+  const total = Math.ceil(movie.size / limit);
+  if (!total) throw Error(movie.name+' 是空文件。');
+  for (let n = 0; n < total; n++) {
+    const name = movie.name + '.part' + String(n + 1).padStart(3,'0') + '-of-' + String(total).padStart(3,'0');
+    const slice = movie.slice(n * limit, (n + 1) * limit);
+    const existing = await findPart(directory,name);
+    if (existing && (await existing.getFile()).size > 0) {
+      if (!await sameBytes(slice,await existing.getFile())) {
+        throw Error('同名分卷内容不同：'+name+'。请先将旧的分卷文件夹移到别处，再重试。');
+      }
+    } else {
+      const handle = existing || await directory.getFileHandle(name,{create:true});
+      const writer = await handle.createWritable();
+      try { await writer.write(slice); await writer.close(); }
+      catch (error) { try { await writer.abort(); } catch {} throw error; }
+      if (!await sameBytes(slice,await handle.getFile())) throw Error(name+' 回读校验失败。');
+    }
+    onPart(n+1,total,slice.size);
+  }
+  return total;
+}
+const choose = document.querySelector('#choose');
+const status = document.querySelector('#status');
+const progress = document.querySelector('#progress');
+const done = document.querySelector('#done');
+if (!window.showDirectoryPicker) {
+  choose.disabled = true;
+  status.textContent = '请把文件解压后，在 Windows 版 Edge 或 Chrome 中直接打开此 HTML。';
+}
+choose.onclick = async () => {
+  choose.disabled = true;
+  progress.value = 0;
+  done.replaceChildren();
+  try {
+    const source = await window.showDirectoryPicker({mode:'readwrite'});
+    const movies = new Map();
+    for await (const entry of source.values()) {
+      if (entry.kind !== 'file') continue;
+      const title = titles.find(t => entry.name.toLowerCase() === t+'.mp4');
+      if (title) movies.set(title,await entry.getFile());
+    }
+    if (!movies.size) throw Error('未找到目标原片。请选择直接包含“勇闯火焰山.mp4”等录像的文件夹。');
+    const output = await source.getDirectoryHandle('YOYO-录像分卷',{create:true});
+    progress.max = [...movies.values()].reduce((sum,movie) => sum+movie.size,0) || 1;
+    let count = 0;
+    for (const title of titles) {
+      const movie = movies.get(title);
+      if (!movie) continue;
+      status.textContent = '正在分卷并回读校验：'+movie.name;
+      const total = await splitMovie(movie,output,partSize,(index,total,bytes) => {
+        progress.value += bytes;
+        status.textContent = movie.name+'　已校验 '+index+' / '+total+' 卷';
+      });
+      const item = document.createElement('li');
+      item.textContent = title+'　'+total+' 卷已校验';
+      done.append(item);
+      count += total;
+    }
+    status.textContent = '完成：'+movies.size+' 段录像，'+count+' 卷。请同步或上传 YOYO-录像分卷 文件夹。';
+  } catch (error) {
+    status.textContent = error.name === 'AbortError' ? '操作已取消。' : '未完成：'+error.message;
+  } finally { choose.disabled = false; }
+};
+</script>
+</html>
