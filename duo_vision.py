@@ -10,6 +10,9 @@ import numpy as np
 
 
 DUNGEONS = {"水果剧团": "fruit", "挑战十二生肖": "zodiac", "史莱姆居地": "clip7", "十八铜人阵": "clip2"}
+from duo_trail import NAMES, Trail
+DUNGEONS.update(NAMES)
+
 MAP_X, MAP_Y = 562, 129
 
 
@@ -34,6 +37,8 @@ def outline(image):
 
 def map_origin(atlas, image):
     """Vote across separated map patches; moving arrows and characters are outliers."""
+    if atlas is None:
+        return None
     local = outline(image[129:338, 562:765])
     votes = Counter()
     for y in (3, 59, 115, 159):
@@ -63,15 +68,20 @@ class Vision:
     def __init__(self, dungeon):
         data = json.loads(Path(__file__).with_name('duo_profiles.json').read_text(encoding='utf8'))
         self.key = DUNGEONS[dungeon]
-        self.route = data.pop('routes')[self.key]
-        self.path = data.pop('paths')[self.key]
+        routes,paths=data.pop('routes'),data.pop('paths')
+        self.trail=Trail(self.key) if self.key in NAMES.values() else None
+        self.route=self.trail.routes if self.trail else routes[self.key]
+        self.path=paths.get(self.key,[])
+        if self.trail:
+            data.update(self.trail.profile['patterns'])
+            data.update(self.trail.party['patterns'])
         self.patterns = {}
         for name, (box, encoded) in data.items():
             if name.endswith('_atlas') and name != self.key + '_atlas':
                 continue
             flags = cv2.IMREAD_COLOR if box else cv2.IMREAD_GRAYSCALE
             self.patterns[name] = box, cv2.imdecode(np.frombuffer(base64.b64decode(encoded), np.uint8), flags)
-        self.atlas = self.patterns[self.key+'_atlas'][1]
+        self.atlas = None if self.trail else self.patterns[self.key+'_atlas'][1]
 
     def find(self, im, name, region=None, threshold=.81):
         box, template = self.patterns[name]
@@ -98,6 +108,8 @@ class Vision:
 
     def scene(self, im):
         has = lambda key: self.find(im, key) is not None
+        if self.trail and has('idle_gesture'): return 'idle'
+        if self.trail and has('success') and (has('rewardtext') or has('reward_label')): return 'settle'
         if has('reward') and has('rewardtext'):
             return 'settle'
         if has('skip') and has('storybox'):
@@ -117,6 +129,15 @@ class Vision:
             return 'daily'
         if has('catalog'):
             return 'catalog'
+        if self.trail:
+            if has('party_panel'): return 'party_panel'
+            if has('port') or has('port_big'): return 'port'
+            if has('battle'): return 'battle'
+            if has('big') and has(self.key+'_bigtitle'): return 'map'
+            if has(self.key+'_mapname') and not has('big'): return 'field'
+            if has(self.key+'_fieldname') and not has('big') and self.trail.ocr.read(im,False):
+                return 'field'
+            return 'unknown'
         if has(self.key+'_fieldname'):
             if has('battle'):
                 return 'battle'
@@ -206,6 +227,12 @@ class Vision:
             if (target[0]<216 and 122<target[1]<315) or (target[0]>675 and target[1]<127):
                 return None
             return target
+        if self.trail:
+            for key,(box,needle) in self.patterns.items():
+                if not key.startswith(self.key+'_sprite_'):continue
+                score,(x,y)=peak(im[30:323,42:747],needle)
+                pt=42+x+needle.shape[1]//2,30+y+needle.shape[0]//2
+                if score>.84 and self.clear_world(pt):return pt
         return None
 
 

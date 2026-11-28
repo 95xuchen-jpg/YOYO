@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from math import dist
 import time
 
+from duo_trail import party_visible, same_portrait
 from duo_vision import Action, Vision, matching_rosters
 
 
@@ -16,6 +17,7 @@ class Role:
     entered: bool = False
     settled: bool = False
     returned: bool = False
+    close_to_goal: bool = False
     last_walk: float = -100
     intermediates: set = field(default_factory=set)
     last_action: str = ''
@@ -25,6 +27,7 @@ class Role:
     since: float = 0
 
     def advance(self):
+        self.close_to_goal = False
         self.index += 1
         self.routed = self.targeted = self.fought = False
         self.intermediates.clear()
@@ -36,6 +39,7 @@ class Run:
         self.roles = [Role(), Role()]
         self.host_created = self.join_selected = self.started = False
         self.slime_boss = False
+        self.invited = self.accepted = self.in_party = self.kills_done = False
 
     def observe(self, images, scenes, now):
         for i, (r, sc, im) in enumerate(zip(self.roles, scenes, images)):
@@ -44,7 +48,19 @@ class Run:
                 r.last_action, r.attempts = '', 0
             if self.started and sc in ('field','map','battle'):
                 r.entered = True
-            if sc == 'battle' and (r.targeted or (r.routed and self.vision.key != 'clip7')):
+            tr=self.vision.trail
+            if tr and self.started and r.entered:
+                if tr.counter is not None and not self.kills_done and sc in ('field','map','battle'):
+                    self.kills_done=bool(self.vision.find(im,'quest_finished',threshold=.82) or
+                        self.vision.find(im,'quest_heading',threshold=.72) and tr.counter_state(im)=='complete')
+                if self.accepted and tr.party_at and party_visible(im):
+                    self.in_party=True
+                if sc in ('field','map') and r.index<len(tr.routes[i]):
+                    gx,gy,kind,_=tr.routes[i][r.index]
+                    pos=tr.ocr.read(im,sc=='map')
+                    if pos:r.close_to_goal=kind!='walk' and dist(pos,(gx,gy))<=330
+            if sc == 'battle' and (r.targeted or (tr and r.close_to_goal) or
+                                   (not tr and r.routed and self.vision.key != 'clip7')):
                 r.fought = True
             if r.fought and sc in ('field','map'):
                 r.advance()
@@ -59,6 +75,75 @@ class Run:
                     player.index = 2
                     player.routed = player.targeted = player.fought = False
                     player.intermediates.clear()
+
+    def party_ready(self):
+        at=self.vision.trail.party_at
+        return at is not None and (self.vision.trail.patrol is None or self.kills_done) and all(r.entered and r.index>=n for r,n in zip(self.roles,at))
+
+    def party_action(self,i,images,scenes):
+        v=self.vision
+        im=images[i]
+        if i==1:
+            if (self.invited and scenes[i] in ('map','field') and v.find(im,'party_deny')
+                and v.find(im,'party_confirm') and same_portrait(im[187:215,45:74],images[0])):
+                return Action('接受主号邀请',v.find(im,'party_confirm'))
+            return None
+        if scenes[0]=='party_panel':
+            if self.in_party:
+                return Action('关闭邀请列表',v.find(im,'party_close')) if v.find(im,'party_close') else None
+            button=v.find(im,'party_send') or v.find(im,'invite_plain',threshold=.75)
+            second=(v.find(im,'party_send',(444,168,520,204)) or
+                    v.find(im,'invite_plain',(444,168,520,204),.75))
+            if not self.invited and button and not second and same_portrait(im[125:154,299:329],images[1]):
+                return Action('邀请已绑定的副号',button)
+            return None
+        if self.in_party:return None
+        if scenes[0]=='map':return Action('收起地图',(781,114))
+        if scenes[0]!='field' or self.invited:return None
+        invite=v.find(im,'party_open')
+        if invite:return Action('打开组队邀请',invite)
+        tab=v.find(im,'party_tab',threshold=.72)
+        return Action('打开队伍页签',tab) if tab else None
+
+    def trail_action(self,i,images,scenes,now):
+        v=self.vision
+        tr=v.trail
+        r=self.roles[i];im=images[i];sc=scenes[i]
+        gate=tr.party_at
+        if (sc=='party_panel' and self.in_party) or (self.party_ready() and not self.in_party):
+            return self.party_action(i,images,scenes)
+        if sc not in ('field','map') or not r.entered:return None
+        if gate is not None and not self.in_party and r.index>=gate[i]:
+            # The other role can still be clearing its kill objective.
+            if not tr.patrol or self.kills_done or i==0:return None
+        if i==1 and self.in_party:return None
+        if tr.patrol and not self.kills_done:
+            lo,hi=tr.patrol[i]
+            if r.index>=hi:
+                # A hidden quest tracker cannot confirm that the kill gate has opened.
+                if tr.counter_state(im) is None and v.find(im,'party_open'):
+                    return Action('查看过关条件',(20,163))
+                return Action('重复清怪巡逻'),lo
+        if r.index>=len(v.route[i]):return None
+        gx,gy,kind,_=v.route[i][r.index]
+        pos=tr.ocr.read(im,sc=='map')
+        if pos is None:return None
+        distance=dist(pos,(gx,gy))
+        if distance<= (155 if kind=='walk' else 205):
+            if kind=='walk':return Action('已到路线坐标'),r.index
+            if sc=='map':return Action('收起地图',(781,114))
+            if kind=='visit' and r.targeted and now-r.last_time>3:return Action('已到路线坐标'),r.index
+            if not r.targeted or now-r.last_time>=4:
+                point=v.npc(im,i,r.index)
+                if point:return Action('与目标交互',point)
+                if kind=='visit':return Action('已到路线坐标'),r.index
+            return None
+        if now-r.last_walk<2:return None
+        if sc=='field':
+            return Action('展开副本地图',(737,54))
+        p=tr.destination(im,pos,(gx,gy))
+        if p:return Action('按当前坐标寻路',p),r.index
+        return None
 
     def propose(self, i, images, scenes, now):
         v, r, im, sc = self.vision, self.roles[i], images[i], scenes[i]
@@ -93,10 +178,13 @@ class Run:
                 and matching_rosters(images)):
                 return Action('双号到齐，开始挑战',(462,367))
             return None
+        if sc=='idle' and r.entered:
+            return Action('解除游戏省电模式',(380,225))
         if sc=='settle' and r.settled:
-            return Action('前往领奖', v.find(im,'reward'))
+            return Action('前往领奖', v.find(im,'reward') or (v.find(im,'reward_alt',threshold=.65) if v.trail else None) or (586,337))
         if sc=='dialog' and r.entered:
             return Action('继续副本对话',v.find(im,'skip'))
+        if v.trail:return self.trail_action(i,images,scenes,now)
         if sc not in ('field','map') or not r.entered:
             return None
         route=v.route[i]
@@ -126,6 +214,13 @@ class Run:
         elif key=='加入私人房间': self.join_selected=True
         elif key=='填写房间密码': r.pin_filled=True
         elif key=='双号到齐，开始挑战': self.started=True
+        elif key=='邀请已绑定的副号': self.invited=True
+        elif key=='接受主号邀请': self.accepted=True
+        elif key=='按当前坐标寻路': r.last_walk=now
+        elif key=='已到路线坐标': r.advance()
+        elif key=='重复清怪巡逻':
+            r.index=intermediate
+            r.targeted=r.fought=r.close_to_goal=False
         elif key=='前往目标': r.routed=True; r.last_walk=now
         elif key=='途经地图路点': r.intermediates.add(intermediate); r.last_walk=now
         elif key=='与目标交互': r.targeted=True
@@ -144,7 +239,8 @@ def unpack(proposal):
     return proposal if isinstance(proposal,tuple) else (proposal,None)
 
 
-def drive(run, capture, send, stopped, wait, log, *, duration=1250, clock=time.monotonic):
+def drive(run, capture, send, stopped, wait, log, *, duration=None, clock=time.monotonic):
+    if duration is None:duration=1850 if run.vision.key in ('dark','ghost') else 1250
     started=clock()
     last_progress=[started, started]
     signatures=[None,None]
@@ -162,8 +258,11 @@ def drive(run, capture, send, stopped, wait, log, *, duration=1250, clock=time.m
                 log(i,scenes[i],r.index+1)
                 signatures[i]=sig
                 last_progress[i]=now
-            if not r.returned and not (r.entered and r.index>=len(run.vision.route[i])):
-                if now-last_progress[i] > (240 if scenes[i]=='battle' else 85):
+            waiting=run.vision.trail and (r.entered and i==1 and run.in_party or
+                r.entered and run.vision.trail.party_at and not run.in_party and
+                r.index>=run.vision.trail.party_at[i] and not run.party_ready())
+            if not waiting and not r.returned and not (r.entered and r.index>=len(run.vision.route[i])):
+                if now-last_progress[i] > (360 if scenes[i]=='battle' else 85):
                     raise ValueError(f'{"主号" if i==0 else "副号"}长时间未推进：{scenes[i]}，路线第 {r.index+1} 段')
         if all(r.returned for r in run.roles):
             return 'both_returned_after_settlement'
@@ -173,7 +272,7 @@ def drive(run, capture, send, stopped, wait, log, *, duration=1250, clock=time.m
             if not action or now-r.last_time<.6:
                 continue
             if action.name==r.last_action:
-                if r.attempts>=3 and action.name!='刷新房间列表':
+                if r.attempts>=3 and action.name not in ('刷新房间列表','已到路线坐标','按当前坐标寻路'):
                     raise ValueError('同一步骤未生效：'+action.name)
                 if now-r.last_time<(5 if action.name=='刷新房间列表' else 2):
                     continue
@@ -185,7 +284,7 @@ def drive(run, capture, send, stopped, wait, log, *, duration=1250, clock=time.m
             if (not second or second.name!=action.name or step!=second_step or
                 dist(second.point,action.point)>5 or stopped()):
                 break
-            if second.name not in ('切换巡逻路点','重新定位目标'):
+            if second.name not in ('切换巡逻路点','重新定位目标','已到路线坐标','重复清怪巡逻'):
                 send(i,second)
             run.sent(i,second,step,clock())
             log(i,second.name,r.index+1)

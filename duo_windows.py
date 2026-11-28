@@ -1,4 +1,4 @@
-"""Windows desktop adapter for the four recorded daily dungeons."""
+"""Windows desktop adapter for the recorded daily dungeons."""
 import ctypes
 import json
 import os
@@ -71,6 +71,9 @@ def play(dungeon, windows, stop, emit):
             if stopped():
                 raise InterruptedError('本轮已停止')
             w=windows[i]
+            if action.name=='解除游戏省电模式':
+                wake_idle(user,w,rects[i],check,stopped)
+                return
             click_client(p,w,rects[i],action.point)
             if action.name!='填写房间密码':
                 return
@@ -93,6 +96,26 @@ def play(dungeon, windows, stop, emit):
             raise
         log(-1,status,0)
     return status
+
+
+def wake_idle(user,window,rect,check,stopped):
+    """Swipe across the center of the game's confirmed power-saving screen."""
+    user.WindowFromPoint.argtypes=[wintypes.POINT]
+    user.WindowFromPoint.restype=wintypes.HWND
+    def move(x):
+        check()
+        if stopped():raise InterruptedError('本轮已停止')
+        point=wintypes.POINT(rect.x+round(x*rect.width/800),rect.y+rect.height//2)
+        if user.WindowFromPoint(point)!=window.hwnd or not user.SetCursorPos(point.x,point.y):
+            raise ValueError('省电画面被遮挡或窗口已变化')
+    move(322)
+    user.mouse_event(0x0002,0,0,0,0)
+    try:
+        for x in range(332,493,10):
+            move(x)
+            time.sleep(.012)
+    finally:
+        user.mouse_event(0x0004,0,0,0,0)
 
 
 def _key_tap(user,vk):
@@ -204,7 +227,8 @@ if __name__=='__main__':
         from duo_vision import DUNGEONS
         for name in DUNGEONS:
             r=Run(name)
-            assert len(r.vision.route)==2 and r.vision.atlas.size and not r.started
-        print('OK: 4 profiles, 8 role routes')
+            assert len(r.vision.route)==2 and all(r.vision.route) and not r.started
+            assert r.vision.trail or r.vision.atlas.size
+        assert len(DUNGEONS)==10
     else:
         gui()
