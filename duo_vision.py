@@ -11,6 +11,7 @@ import numpy as np
 
 DUNGEONS = {"水果剧团": "fruit", "挑战十二生肖": "zodiac", "史莱姆居地": "clip7", "十八铜人阵": "clip2"}
 from duo_trail import NAMES, Trail
+from duo_lobby import same_owner
 DUNGEONS.update(NAMES)
 
 MAP_X, MAP_Y = 562, 129
@@ -75,6 +76,7 @@ class Vision:
         if self.trail:
             data.update(self.trail.profile['patterns'])
             data.update(self.trail.party['patterns'])
+        data.update(json.loads((Path(__file__).with_name('duo_trails')/'public_lobby.json').read_text()))
         self.patterns = {}
         for name, (box, encoded) in data.items():
             if name.endswith('_atlas') and name != self.key + '_atlas':
@@ -95,12 +97,12 @@ class Vision:
         h, w = template.shape[:2]
         return x+px+w//2, y+py+h//2
 
-    def room_row(self, im):
+    def room_row(self, im, host):
         name = self.key+'_rowname'
         rows = []
         for y in (134, 173, 212, 252, 291):
             if (self.find(im, name, (293,y-15,416,y+17), .78) and
-                self.find(im, 'private', (180,y-15,234,y+15), .78)):
+                self.find(im, 'public_type', (182,y-14,231,y+15), .84) and same_owner(host, im, y)):
                 plus = self.find(im, 'plus', (638,y-15,674,y+15))
                 if plus:
                     rows.append(plus)
@@ -117,8 +119,9 @@ class Vision:
         if has('join'):
             return 'join_pin'
         if has('settings'):
-            x = im[190:219,454:482].astype(int)
-            return 'create_pin' if ((x[:,:,1] > x[:,:,2]+20) & (x[:,:,1] > x[:,:,0]+20)).sum() > 45 else 'settings'
+            if has('checked_public'):return 'public_settings'
+            if has('unchecked_public'):return 'private_settings'
+            return 'unknown'
         if has('room'):
             return 'room'
         if has('detail'):

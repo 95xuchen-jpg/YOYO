@@ -1,16 +1,16 @@
-"""One private two-character PvE run, driven by visible game screens."""
+"""One public two-character PvE run, driven by visible game screens."""
 from dataclasses import dataclass, field
 from math import dist
 import time
 
 from duo_trail import party_visible, same_portrait
 from duo_vision import Action, Vision, matching_rosters
+from duo_lobby import card_label, catalog_view
 
 
 @dataclass
 class Role:
     index: int = 0
-    pin_filled: bool = False
     routed: bool = False
     targeted: bool = False
     fought: bool = False
@@ -38,11 +38,17 @@ class Run:
         self.vision = Vision(dungeon)
         self.roles = [Role(), Role()]
         self.host_created = self.join_selected = self.started = False
+        self.swipe_before = None
+        self.swipe_back = False
+        self.catalog_image = None
+        self.public_confirmed = False
         self.slime_boss = False
         self.invited = self.accepted = self.in_party = self.kills_done = False
 
     def observe(self, images, scenes, now):
         for i, (r, sc, im) in enumerate(zip(self.roles, scenes, images)):
+            if i==0 and not self.started and sc=='catalog':
+                self.catalog_image=catalog_view(im)
             if sc != r.scene:
                 r.scene, r.since = sc, now
                 r.last_action, r.attempts = '', 0
@@ -145,6 +151,19 @@ class Run:
         if p:return Action('按当前坐标寻路',p),r.index
         return None
 
+    def catalog_action(self,im,now):
+        role=self.roles[0]
+        if now-role.last_time<1.0:return None
+        pattern=self.vision.patterns[self.vision.key+'_detailname'][1]
+        point=card_label(im,pattern)
+        if point:return Action('选择队列副本',point)
+        reverse=self.swipe_back
+        if self.swipe_before is not None and abs(catalog_view(im)-self.swipe_before).mean()<4:
+            if reverse:
+                raise ValueError('已查看副本目录，未找到所选副本，请检查开放条件。')
+            reverse=True
+        return Action('向前翻副本目录',(240,268)) if reverse else Action('向后翻副本目录',(613,268))
+
     def propose(self, i, images, scenes, now):
         v, r, im, sc = self.vision, self.roles[i], images[i], scenes[i]
         if r.returned:
@@ -152,29 +171,40 @@ class Run:
         if not self.started:
             if i == 0 and sc == 'detail' and not self.host_created:
                 return Action('创建房间',(605,402))
-            if i == 0 and sc == 'settings' and self.host_created:
-                return Action('选择私人房间',(467,205))
-            allowed_pin = (i==0 and sc=='create_pin' and self.host_created
-                           or i==1 and sc=='join_pin' and self.join_selected)
-            if allowed_pin:
-                if not r.pin_filled:
-                    return Action('填写房间密码', (444,244) if i==0 else (440,248))
-                ok = v.find(im, 'orange_ok')
-                return Action('确认私人房间',ok) if ok else None
+            if i==0 and self.host_created and sc=='private_settings':
+                return Action('改为公开房间',(386,205))
+            if i==0 and self.host_created and sc=='public_settings' and not self.public_confirmed:
+                ok=v.find(im,'orange_ok')
+                if ok:return Action('确认创建公开房',ok)
+            if sc=='port':
+                button=v.find(im,'port_daily',threshold=.72) or v.find(im,'dailybutton',threshold=.72)
+                return Action('打开日常',button) if button else None
+            if sc=='daily':
+                return Action('打开副本目录',(750,165))
+            if i==0 and sc=='list' and not self.host_created:
+                return Action('打开副本资讯',(83,99))
+            if i==0 and sc=='other_detail' and not self.host_created and now-r.since>=2:
+                if v.find(im,v.key+'_detailname'):
+                    raise ValueError('所选副本的创建按钮不可用，请检查入场次数和条件。')
+                close=v.find(im,'detail_close')
+                return Action('返回副本目录',close) if close else None
+            if i==0 and sc=='catalog' and not self.host_created:
+                return self.catalog_action(im,now)
+            if i==1 and sc=='join_pin':
+                raise ValueError('副号出现了私房密码框，队列已停止。')
             if i == 1:
-                if sc == 'daily':
-                    return Action('打开副本目录',(750,165))
                 if sc == 'catalog':
                     return Action('打开房间列表',(82,140))
-                if sc == 'list' and scenes[0] == 'room' and self.host_created and not self.join_selected:
-                    row = v.room_row(im)
+                if sc == 'list' and scenes[0] == 'room' and self.public_confirmed and not self.join_selected:
+                    row = v.room_row(im,images[0])
                     if row:
-                        return Action('加入私人房间',row)
+                        return Action('加入主号公开房',row)
                     if now-r.since>5:
                         return Action('刷新房间列表',(220,402))
-            if (i==0 and scenes==['room','room'] and self.host_created and self.join_selected
+            if (i==0 and scenes==['room','room'] and self.public_confirmed and self.join_selected
                 and v.find(im,'host_kick') and v.find(images[1],'guest')
                 and v.find(im,'third_empty') and v.find(images[1],'third_empty')
+                and v.find(im,'empty4') and v.find(images[1],'empty4')
                 and matching_rosters(images)):
                 return Action('双号到齐，开始挑战',(462,367))
             return None
@@ -211,8 +241,11 @@ class Run:
         r=self.roles[i]
         key=action.name
         if key=='创建房间': self.host_created=True
-        elif key=='加入私人房间': self.join_selected=True
-        elif key=='填写房间密码': r.pin_filled=True
+        elif key=='加入主号公开房': self.join_selected=True
+        elif key=='确认创建公开房':self.public_confirmed=True
+        elif key in ('向后翻副本目录','向前翻副本目录'):
+            self.swipe_before=self.catalog_image
+            self.swipe_back=key=='向前翻副本目录'
         elif key=='双号到齐，开始挑战': self.started=True
         elif key=='邀请已绑定的副号': self.invited=True
         elif key=='接受主号邀请': self.accepted=True
@@ -272,7 +305,7 @@ def drive(run, capture, send, stopped, wait, log, *, duration=None, clock=time.m
             if not action or now-r.last_time<.6:
                 continue
             if action.name==r.last_action:
-                if r.attempts>=3 and action.name not in ('刷新房间列表','已到路线坐标','按当前坐标寻路'):
+                if r.attempts>=3 and action.name not in ('刷新房间列表','已到路线坐标','按当前坐标寻路','向前翻副本目录','向后翻副本目录'):
                     raise ValueError('同一步骤未生效：'+action.name)
                 if now-r.last_time<(5 if action.name=='刷新房间列表' else 2):
                     continue

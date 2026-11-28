@@ -3,7 +3,6 @@ import ctypes
 import json
 import os
 from pathlib import Path
-import secrets
 import threading
 import time
 from ctypes import wintypes
@@ -14,11 +13,10 @@ from mss import mss
 
 from duo_run import Run, drive
 from fruit_actions import click_client
-from room_pin import configured_code
 from windows_provider import WindowsClientProvider
 
 
-def play(dungeon, windows, stop, emit):
+def play(dungeons, rounds, windows, stop, emit):
     if len(windows)!=2 or len({w.hwnd for w in windows})!=2 or len({w.pid for w in windows})!=2:
         raise ValueError('请选择两个不同游戏进程的窗口')
     p=WindowsClientProvider()
@@ -42,11 +40,9 @@ def play(dungeon, windows, stop, emit):
         if user.GetAsyncKeyState(0x77) & 0x8001:
             stop.set()
         return stop.is_set()
-    code=configured_code() or f'{secrets.randbelow(10000):04d}'
     left,top=min(r.x for r in rects),min(r.y for r in rects)
     box=dict(left=left,top=top,width=max(r.x+r.width for r in rects)-left,
              height=max(r.y+r.height for r in rects)-top)
-    run=Run(dungeon)
     folder=Path.home()/'YOYO_Logs'
     folder.mkdir(parents=True,exist_ok=True)
     path=folder / f'duo-{time.strftime("%Y%m%d-%H%M%S")}-{os.getpid()}.jsonl'
@@ -55,7 +51,7 @@ def play(dungeon, windows, stop, emit):
         def log(i,event,step):
             out.write(json.dumps(dict(time=time.strftime('%H:%M:%S'),role=i,event=event,
                                       step=step,dungeon=dungeon),ensure_ascii=False)+'\n')
-            emit(f'{"主号" if i==0 else "副号"} · {event} · 路线 {step}')
+            emit(event if i<0 else f'{dungeon} · {"主号" if i==0 else "副号"} · {event} · 路线 {step}')
         def capture():
             check()
             image=np.asarray(desktop.grab(box))[:,:,:3]
@@ -71,71 +67,57 @@ def play(dungeon, windows, stop, emit):
             if stopped():
                 raise InterruptedError('本轮已停止')
             w=windows[i]
-            if action.name=='解除游戏省电模式':
-                wake_idle(user,w,rects[i],check,stopped)
+            swipes={'解除游戏省电模式':(322,492,224),'向后翻副本目录':(613,261,268),'向前翻副本目录':(240,592,268)}
+            if action.name in swipes:
+                swipe(user,w,rects[i],check,stopped,*swipes[action.name])
                 return
             click_client(p,w,rects[i],action.point)
-            if action.name!='填写房间密码':
-                return
-            # The UI remembers some previous codes. Clear all four slots before typing.
-            stop.wait(.12)
-            for vk in [0x23]+[0x08]*4+[ord(c) for c in code]:
-                check()
-                if stopped() or user.GetForegroundWindow()!=w.hwnd:
-                    raise ValueError('房间密码输入中止：焦点变化或按下停止键')
-                # Both events are submitted together to avoid leaving a held key.
-                _key_tap(user,vk)
-                stop.wait(.045)
-        initial=[run.vision.scene(im) for im in capture()]
-        if initial[0]!='detail' or initial[1] not in ('list','daily','catalog'):
-            raise ValueError('起始画面不符。主号打开所选副本详情，副号打开房间列表。当前：'+' / '.join(initial))
+        def run_one(name,index,total):
+            nonlocal dungeon
+            dungeon=name
+            run=Run(name)
+            log(-1,f'开始队列 {index}/{total} · {name}',0)
+            try:
+                result=drive(run,capture,send,stopped,stop.wait,log)
+            except Exception as exc:
+                log(-1,'停止：'+str(exc),0)
+                raise
+            log(-1,result,0)
+            return result
+        dungeon=''
+        return run_queue(dungeons,rounds,run_one,stopped)
+
+
+def run_queue(dungeons,rounds,run_one,stopped):
+    if not dungeons or rounds<1:raise ValueError('请选择副本并填写正整数轮数')
+    order=tuple(dungeons)*rounds
+    for index,name in enumerate(order,1):
+        if stopped():return 'stopped'
         try:
-            status=drive(run,capture,send,stopped,stop.wait,log)
+            result=run_one(name,index,len(order))
         except Exception as exc:
-            log(-1,'暂停：'+str(exc),0)
-            raise
-        log(-1,status,0)
-    return status
+            raise ValueError(f'队列 {index}/{len(order)} · {name} 已停止：{exc}') from exc
+        if result!='both_returned_after_settlement':return 'stopped'
+    return 'queue_complete'
 
 
-def wake_idle(user,window,rect,check,stopped):
-    """Swipe across the center of the game's confirmed power-saving screen."""
+def swipe(user,window,rect,check,stopped,start,end,y):
     user.WindowFromPoint.argtypes=[wintypes.POINT]
     user.WindowFromPoint.restype=wintypes.HWND
     def move(x):
         check()
-        if stopped():raise InterruptedError('本轮已停止')
-        point=wintypes.POINT(rect.x+round(x*rect.width/800),rect.y+rect.height//2)
+        if stopped():raise InterruptedError('队列已停止')
+        point=wintypes.POINT(rect.x+round(x*rect.width/800),rect.y+round(y*rect.height/448))
         if user.WindowFromPoint(point)!=window.hwnd or not user.SetCursorPos(point.x,point.y):
-            raise ValueError('省电画面被遮挡或窗口已变化')
-    move(322)
+            raise ValueError('目标位置被遮挡或窗口已变化')
+    move(start)
     user.mouse_event(0x0002,0,0,0,0)
     try:
-        for x in range(332,493,10):
-            move(x)
-            time.sleep(.012)
+        for step in range(1,27):
+            move(start+(end-start)*step/26)
+            time.sleep(.014)
     finally:
         user.mouse_event(0x0004,0,0,0,0)
-
-
-def _key_tap(user,vk):
-    class Keyboard(ctypes.Structure):
-        _fields_=[('vk',wintypes.WORD),('scan',wintypes.WORD),('flags',wintypes.DWORD),
-                  ('time',wintypes.DWORD),('extra',ctypes.c_size_t)]
-    class Mouse(ctypes.Structure):
-        _fields_=[('x',wintypes.LONG),('y',wintypes.LONG),('data',wintypes.DWORD),
-                  ('flags',wintypes.DWORD),('time',wintypes.DWORD),('extra',ctypes.c_size_t)]
-    class Payload(ctypes.Union):
-        _fields_=[('key',Keyboard),('mouse',Mouse)]
-    class Event(ctypes.Structure):
-        _fields_=[('kind',wintypes.DWORD),('payload',Payload)]
-    pair=(Event*2)()
-    for ev,flags in zip(pair,(0,2)):
-        ev.kind=1
-        ev.payload.key=Keyboard(vk,0,flags,0,0)
-    user.SendInput.argtypes=[wintypes.UINT,ctypes.POINTER(Event),ctypes.c_int]
-    if user.SendInput(2,pair,ctypes.sizeof(Event))!=2:
-        raise OSError('Windows 未接收输入')
 
 
 def gui():
@@ -150,19 +132,37 @@ def gui():
     root.title('YOYO · 双账号日常副本')
     body=ttk.Frame(root,padding=15)
     body.pack(fill='both',expand=True)
-    ttk.Label(body,text='主号打开目标副本详情，副号打开房间列表。两个角色提前开启游戏内自动战斗。').grid(row=0,columnspan=3,sticky='w')
+    ttk.Label(body,text='两个角色停在曼谷港，开启游戏内自动战斗。助手会建公开房，副号按房主名称加入。').grid(row=0,columnspan=3,sticky='w')
     ttk.Label(body,text='运行期间保持两个游戏窗口并排可见。随时按 F8 停止。').grid(row=1,columnspan=3,sticky='w',pady=(0,10))
     query=tk.StringVar(value='飘流')
     ttk.Label(body,text='窗口标题包含').grid(row=2,column=0,sticky='w')
     ttk.Entry(body,textvariable=query).grid(row=2,column=1,sticky='ew')
     boxes=[]
-    for row,label in enumerate(('主号窗口','副号窗口','副本'),3):
+    for row,label in enumerate(('主号窗口','副号窗口'),3):
         ttk.Label(body,text=label).grid(row=row,column=0,sticky='w')
         box=ttk.Combobox(body,state='readonly',width=42)
         box.grid(row=row,column=1,columnspan=2,sticky='ew',pady=3)
         boxes.append(box)
-    boxes[2].configure(values=list(DUNGEONS))
-    boxes[2].current(0)
+    selected=[]
+    choices_frame=ttk.LabelFrame(body,text='按勾选顺序进入副本',padding=6)
+    choices_frame.grid(row=5,columnspan=3,sticky='ew',pady=6)
+    queue_text=tk.StringVar()
+    def toggle(name,flag):
+        if flag.get():selected.append(name)
+        else:selected.remove(name)
+        queue_text.set(' → '.join(selected) or '请选择副本')
+    flags=[]
+    for n,name in enumerate(DUNGEONS):
+        flag=tk.BooleanVar(value=n==0)
+        flags.append(flag)
+        if n==0:toggle(name,flag)
+        ttk.Checkbutton(choices_frame,text=name,variable=flag,
+                        command=lambda name=name,f=flag:toggle(name,f)).grid(
+                            row=n//3,column=n%3,sticky='w',padx=6)
+    ttk.Label(body,textvariable=queue_text,wraplength=510).grid(row=6,columnspan=3,sticky='w')
+    rounds=tk.StringVar(value='1')
+    ttk.Label(body,text='队列轮数').grid(row=7,column=0,sticky='w')
+    ttk.Spinbox(body,from_=1,to=99,textvariable=rounds,width=6).grid(row=7,column=1,sticky='w')
     windows={}
     def refresh():
         try:
@@ -182,14 +182,14 @@ def gui():
         except Exception as exc:messagebox.showerror('窗口',str(exc))
     ttk.Button(body,text='查找窗口',command=refresh).grid(row=2,column=2)
     status=tk.StringVar(value='等待选择窗口')
-    ttk.Label(body,textvariable=status,wraplength=560).grid(row=7,columnspan=3,sticky='w',pady=8)
+    ttk.Label(body,textvariable=status,wraplength=560).grid(row=9,columnspan=3,sticky='w',pady=8)
     stop=threading.Event()
     messages=queue.Queue()
-    def worker(name,selected):
+    def worker(names,count,windows_pair):
         try:
             time.sleep(.65)
-            result=play(name,selected,stop,lambda s:messages.put((False,s)))
-            final='两个账号均已结算并返回曼谷港。' if result=='both_returned_after_settlement' else '本轮已停止。'
+            result=play(names,count,windows_pair,stop,lambda s:messages.put((False,s)))
+            final=f'队列完成，共 {len(names)*count} 场，两个账号均已结算回港。' if result=='queue_complete' else '队列已停止。'
         except Exception as exc:
             final=str(exc)
         messages.put((True,final))
@@ -207,16 +207,22 @@ def gui():
         if not all(sel) or sel[0].pid==sel[1].pid:
             messagebox.showinfo('双开窗口','请分别选择主号和副号。')
             return
-        if not messagebox.askokcancel('运行一轮',f'{boxes[2].get()}：助手将控制这两个游戏窗口，完成一轮后停止。'):
+        try:count=int(rounds.get())
+        except ValueError:count=0
+        if not selected or not 1<=count<=99:
+            messagebox.showinfo('副本队列','请至少选择一个副本，队列轮数可填 1 至 99。')
+            return
+        names=tuple(selected)
+        if not messagebox.askokcancel('运行队列',f'{" → ".join(names)}\n共 {count} 轮、{len(names)*count} 场。现在开始？'):
             return
         stop.clear()
         run_button.configure(state='disabled')
         root.iconify()
-        threading.Thread(target=worker,args=(boxes[2].get(),sel),daemon=True).start()
+        threading.Thread(target=worker,args=(names,count,sel),daemon=True).start()
         root.after(100,poll)
-    run_button=ttk.Button(body,text='运行一轮',command=start)
-    run_button.grid(row=6,column=1,sticky='ew',pady=8)
-    ttk.Button(body,text='停止（F8）',command=stop.set).grid(row=6,column=2)
+    run_button=ttk.Button(body,text='开始队列',command=start)
+    run_button.grid(row=8,column=1,sticky='ew',pady=8)
+    ttk.Button(body,text='停止（F8）',command=stop.set).grid(row=8,column=2)
     root.protocol('WM_DELETE_WINDOW',lambda:(stop.set(),root.destroy()))
     root.mainloop()
 

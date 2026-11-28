@@ -51,4 +51,6 @@ class FilmRouteTests(unittest.TestCase):
         self.assertIsNone(ctl.propose(1,self.pair,['detail','list'],1))
         self.assertIsNone(ctl.propose(1,self.pair,['room','list'],1))
         ctl.host_created=True
-        self.assertEqual(ctl.propose(1,self.pair,['room','list'],1).name,'加入私人房间')
+        self.assertIsNone(ctl.propose(1,self.pair,['room','list'],1))
+        ctl.public_confirmed=True
+        self.assertEqual(ctl.propose(1,self.pair,['room','list'],1).name,'加入主号公开房')
