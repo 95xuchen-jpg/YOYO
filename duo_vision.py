@@ -97,16 +97,21 @@ class Vision:
         h, w = template.shape[:2]
         return x+px+w//2, y+py+h//2
 
+    def host_waiting(self, im):
+        return all(self.find(im, control) for control in
+                   ('owner_badge', 'host_start_label', 'emptyrow'))
+
     def room_row(self, im, host):
-        name = self.key+'_rowname'
-        rows = []
-        for y in (134, 173, 212, 252, 291):
-            if (self.find(im, name, (293,y-15,416,y+17), .78) and
-                self.find(im, 'public_type', (182,y-14,231,y+15), .84) and same_owner(host, im, y)):
-                plus = self.find(im, 'plus', (638,y-15,674,y+15))
-                if plus:
-                    rows.append(plus)
-        return rows[0] if len(rows) == 1 else None
+        matches = []
+        for y in (134, 173, 212, 252, 291, 330, 369):
+            if not same_owner(host, im, y):
+                continue
+            region = (182, y-14, 231, y+15)
+            public = any(self.find(im, label, region, .84) for label in
+                         ('public_type', 'public_type_compact'))
+            if public and self.find(im, self.key+'_rowname', (293,y-15,416,y+17), .78):
+                matches.append(self.find(im, 'plus', (638,y-15,674,y+15)))
+        return matches[0] if len(matches) == 1 else None
 
     def scene(self, im):
         has = lambda key: self.find(im, key) is not None

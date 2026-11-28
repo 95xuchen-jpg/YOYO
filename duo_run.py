@@ -42,6 +42,8 @@ class Run:
         self.swipe_back = False
         self.catalog_image = None
         self.public_confirmed = False
+        self.join_attempts = 0
+        self.last_join = -100
         self.slime_boss = False
         self.invited = self.accepted = self.in_party = self.kills_done = False
 
@@ -195,13 +197,18 @@ class Run:
             if i == 1:
                 if sc == 'catalog':
                     return Action('打开房间列表',(82,140))
-                if sc == 'list' and scenes[0] == 'room' and self.public_confirmed and not self.join_selected:
+                if (sc == 'list' and scenes[0] == 'room' and
+                    (self.public_confirmed or v.host_waiting(images[0]))):
+                    if now-self.last_join < 4:
+                        return None
                     row = v.room_row(im,images[0])
                     if row:
+                        if self.join_attempts >= 3:
+                            raise ValueError('已核对房主并尝试加入三次，副号仍在房间列表。')
                         return Action('加入主号公开房',row)
                     if now-r.since>5:
                         return Action('刷新房间列表',(220,402))
-            if (i==0 and scenes==['room','room'] and self.public_confirmed and self.join_selected
+            if (i==0 and scenes==['room','room'] and self.join_selected
                 and v.find(im,'host_kick') and v.find(images[1],'guest')
                 and v.find(im,'third_empty') and v.find(images[1],'third_empty')
                 and v.find(im,'empty4') and v.find(images[1],'empty4')
@@ -241,7 +248,10 @@ class Run:
         r=self.roles[i]
         key=action.name
         if key=='创建房间': self.host_created=True
-        elif key=='加入主号公开房': self.join_selected=True
+        elif key=='加入主号公开房':
+            self.join_selected=True
+            self.join_attempts+=1
+            self.last_join=now
         elif key=='确认创建公开房':self.public_confirmed=True
         elif key in ('向后翻副本目录','向前翻副本目录'):
             self.swipe_before=self.catalog_image

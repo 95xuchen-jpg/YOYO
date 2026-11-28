@@ -17,9 +17,23 @@ def same_owner(host,guest,y):
     b=crop_ink(np.clip(np.median(b)-b-14,0,255).astype(np.uint8))
     if a is None or b is None:return False
     if abs(np.log((a.shape[1]/a.shape[0])/(b.shape[1]/b.shape[0])))>.22:return False
-    a,b=(cv2.resize(im,(max(14,b.shape[1]*2),27),interpolation=cv2.INTER_LINEAR) for im in (a,b))
-    value=cv2.matchTemplate(cv2.copyMakeBorder(b,2,2,3,3,cv2.BORDER_CONSTANT),a,cv2.TM_CCOEFF_NORMED).max()
-    return value>=.54
+    width = max(14, b.shape[1]*2)
+    a, b = (cv2.resize(im, (width, 27), interpolation=cv2.INTER_LINEAR) for im in (a, b))
+    padded = cv2.copyMakeBorder(b, 2, 2, 3, 3, cv2.BORDER_CONSTANT)
+    if cv2.matchTemplate(padded, a, cv2.TM_CCOEFF_NORMED).max() < .75:
+        return False
+    # A different final character can still give two long names a high overall score.
+    # Compare short, overlapping sections, explicitly including both ends.
+    span = min(width, 24)
+    starts = list(range(0, width-span, 12)) + [width-span]
+    for x in starts:
+        piece = a[:, x:x+span]
+        if piece.std() < 6:
+            continue
+        score = cv2.matchTemplate(padded[:, x:x+span+6], piece, cv2.TM_CCOEFF_NORMED)
+        if score.max() < .72:
+            return False
+    return True
 
 
 def card_label(im, pattern):
